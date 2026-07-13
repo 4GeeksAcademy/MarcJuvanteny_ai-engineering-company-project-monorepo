@@ -1,0 +1,14 @@
+section,metric,value
+totals,total_processed_incidents,5
+totals,total_valid_incidents,1
+totals,total_invalid_incidents,4
+satisfaction,average_satisfaction_closed_cases_with_score,not_available
+incidents_by_category,carrier_issue,1
+incidents_by_status,abierto,1
+incidents_by_country,ES,1
+invalid_records_by_problem_type,missing_field:category,1
+invalid_records_by_problem_type,out_of_range:status,1
+invalid_records_by_problem_type,out_of_range:country,1
+invalid_records_by_problem_type,out_of_range:satisfaction_score,1
+invalid_records_by_problem_type,missing_field:incident_id,1
+invalid_records_by_problem_type,invalid_format:satisfaction_score,1
