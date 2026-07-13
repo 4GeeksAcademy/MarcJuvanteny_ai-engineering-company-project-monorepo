@@ -1,3 +1,4 @@
+import { BackofficeShell } from "@/components/backoffice-shell";
 import { getHito2DashboardResult } from "@/lib/hito2";
 
 export default function Home() {
@@ -10,26 +11,11 @@ export default function Home() {
   ];
 
   return (
-    <div className="backoffice-shell">
-      <aside className="sidebar" aria-label="Navegacion interna de backoffice">
-        <div className="brand">
-          TrackFlow <span>Backoffice</span>
-        </div>
-        <nav>
-          <div className="sidebar-item active">Resumen</div>
-          <div className="sidebar-item">Candidatos</div>
-          <div className="sidebar-item">Pipeline</div>
-          <div className="sidebar-item">Configuracion</div>
-        </nav>
-      </aside>
-
-      <section className="content">
-        <header className="topbar">
-          <h1>Vista de entrada del backoffice</h1>
-          <p>Layout interno separado de la web publica en uis/website.</p>
-        </header>
-
-        <main className="dashboard">
+    <BackofficeShell
+      activeKey="summary"
+      title="Vista de entrada del backoffice"
+      subtitle="Layout interno separado de la web publica en uis/website."
+    >
           <div className="cards">
             <article className="card">
               <h2>Valor inventario</h2>
@@ -73,8 +59,6 @@ export default function Home() {
               ))}
             </div>
           </article>
-        </main>
-      </section>
-    </div>
+    </BackofficeShell>
   );
 }
