@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: incidents-api
+Version: 0.1.0
+Summary: TrackFlow incidents and suppliers API utilities
+Requires-Python: >=3.12
+Requires-Dist: fastapi<1.0.0,>=0.115.0
+Requires-Dist: pydantic<3.0.0,>=2.9.0
+Requires-Dist: python-multipart<1.0.0,>=0.0.9
+Requires-Dist: tinydb<5.0.0,>=4.8.0
+Requires-Dist: uvicorn[standard]<1.0.0,>=0.30.0

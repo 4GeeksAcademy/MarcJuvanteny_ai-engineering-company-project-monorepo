@@ -1,0 +1,22 @@
+[project]
+name = "incidents-api"
+version = "0.1.0"
+description = "TrackFlow incidents and suppliers API utilities"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0,<1.0.0",
+    "pydantic>=2.9.0,<3.0.0",
+    "python-multipart>=0.0.9,<1.0.0",
+    "tinydb>=4.8.0,<5.0.0",
+    "uvicorn[standard]>=0.30.0,<1.0.0",
+]
+
+[project.scripts]
+seed = "seed:main"
+
+[tool.setuptools]
+py-modules = ["main", "models", "seed"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"

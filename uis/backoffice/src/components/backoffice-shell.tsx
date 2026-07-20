@@ -3,6 +3,7 @@ import Link from "next/link";
 const navItems = [
   { href: "/", label: "Resumen", key: "summary" },
   { href: "/incidents-analysis", label: "Incidencias", key: "incidents" },
+  { href: "/suppliers", label: "Proveedores", key: "suppliers" },
   { href: "#", label: "Candidatos", key: "candidates" },
   { href: "#", label: "Pipeline", key: "pipeline" },
   { href: "#", label: "Configuracion", key: "settings" },
