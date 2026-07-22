@@ -1,3 +1,5 @@
+auth_service
 main
 models
 seed
+user_service
