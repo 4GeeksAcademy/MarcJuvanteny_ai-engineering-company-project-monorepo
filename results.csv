@@ -1,0 +1,13 @@
+section,metric,value
+totals,total_processed_incidents,3
+totals,total_valid_incidents,3
+totals,total_invalid_incidents,0
+satisfaction,average_satisfaction_closed_cases_with_score,4.00
+incidents_by_category,carrier_issue,1
+incidents_by_category,lost_parcel,1
+incidents_by_category,inventory_discrepancy,1
+incidents_by_status,cerrado,1
+incidents_by_status,abierto,1
+incidents_by_status,descartado,1
+incidents_by_country,ES,2
+incidents_by_country,US,1
