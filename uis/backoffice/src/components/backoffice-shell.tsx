@@ -1,9 +1,15 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+import { useAuth } from "@/lib/auth-context";
 
 const navItems = [
   { href: "/", label: "Resumen", key: "summary" },
   { href: "/incidents-analysis", label: "Incidencias", key: "incidents" },
   { href: "/suppliers", label: "Proveedores", key: "suppliers" },
+  { href: "/account/profile", label: "Mi cuenta", key: "account" },
   { href: "#", label: "Candidatos", key: "candidates" },
   { href: "#", label: "Pipeline", key: "pipeline" },
   { href: "#", label: "Configuracion", key: "settings" },
@@ -17,6 +23,14 @@ type BackofficeShellProps = {
 };
 
 export function BackofficeShell({ activeKey, title, subtitle, children }: BackofficeShellProps) {
+  const { user, logout } = useAuth();
+  const router = useRouter();
+
+  function onLogout() {
+    logout();
+    router.replace("/login");
+  }
+
   return (
     <div className="backoffice-shell">
       <aside className="sidebar" aria-label="Navegacion interna de backoffice">
@@ -47,8 +61,19 @@ export function BackofficeShell({ activeKey, title, subtitle, children }: Backof
 
       <section className="content">
         <header className="topbar">
-          <h1>{title}</h1>
-          <p>{subtitle}</p>
+          <div className="topbar-row">
+            <div>
+              <h1>{title}</h1>
+              <p>{subtitle}</p>
+            </div>
+
+            <div className="topbar-session">
+              {user ? <span className="topbar-email">{user.email}</span> : null}
+              <button type="button" className="secondary-button compact-button" onClick={onLogout}>
+                Cerrar sesion
+              </button>
+            </div>
+          </div>
         </header>
 
         <main className="dashboard">{children}</main>

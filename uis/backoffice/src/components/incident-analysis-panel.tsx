@@ -2,6 +2,8 @@
 
 import { ChangeEvent, DragEvent, useMemo, useState } from "react";
 
+import { useAuth } from "@/lib/auth-context";
+
 type AnalysisSummary = {
   total_processed_incidents: number;
   total_valid_incidents: number;
@@ -13,16 +15,16 @@ type AnalysisSummary = {
   average_satisfaction_closed_cases_with_score: number | null;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_INCIDENTS_API_URL || "http://localhost:8001";
-
 function formatEntries(record: Record<string, number>) {
   return Object.entries(record).sort((left, right) => right[1] - left[1]);
 }
 
 export function IncidentAnalysisPanel() {
+  const { authFetch } = useAuth();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [summary, setSummary] = useState<AnalysisSummary | null>(null);
 
@@ -67,7 +69,7 @@ export function IncidentAnalysisPanel() {
     setErrorMessage(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/incidents/analyze`, {
+      const response = await authFetch("/api/incidents/analyze", {
         method: "POST",
         body: payload,
       });
@@ -85,6 +87,33 @@ export function IncidentAnalysisPanel() {
       setErrorMessage("No se pudo conectar con la API de incidencias.");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function downloadResults() {
+    setIsExporting(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await authFetch("/api/incidents/results/export");
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        setErrorMessage(data?.detail || "No se pudo descargar el resultado.");
+        return;
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = "results.csv";
+      link.click();
+      URL.revokeObjectURL(downloadUrl);
+    } catch {
+      setErrorMessage("No se pudo conectar con la API para descargar el resultado.");
+    } finally {
+      setIsExporting(false);
     }
   }
 
@@ -122,18 +151,15 @@ export function IncidentAnalysisPanel() {
           <button type="button" className="primary-button" onClick={submitFile} disabled={isSubmitting}>
             {isSubmitting ? "Analizando..." : "Analizar incidencias"}
           </button>
-          <a
-            href={`${API_BASE_URL}/api/incidents/results/export`}
+          <button
+            type="button"
             className={summary ? "secondary-button" : "secondary-button disabled"}
             aria-disabled={!summary}
-            onClick={(event) => {
-              if (!summary) {
-                event.preventDefault();
-              }
-            }}
+            disabled={!summary || isExporting}
+            onClick={() => void downloadResults()}
           >
-            Descargar resultados CSV
-          </a>
+            {isExporting ? "Descargando..." : "Descargar resultados CSV"}
+          </button>
         </div>
 
         {errorMessage ? <p className="feedback-error">{errorMessage}</p> : null}
