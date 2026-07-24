@@ -595,6 +595,73 @@ body {
   justify-content: flex-start;
 }
 
+.topbar-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.topbar-session {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.topbar-email {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.auth-guard-loading {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.auth-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, #0f2f4f 0%, #173c63 55%, #0f6db6 100%);
+}
+
+.auth-card {
+  display: grid;
+  gap: 1rem;
+  width: 100%;
+  max-width: 420px;
+}
+
+.auth-card-wide {
+  max-width: 640px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.auth-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.auth-links {
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.field-error {
+  color: #a54711;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 @media (max-width: 980px) {
   .backoffice-shell {
     grid-template-columns: 1fr;
@@ -610,7 +677,8 @@ body {
   .summary-columns,
   .suppliers-summary-strip,
   .suppliers-filters-grid,
-  .supplier-form-grid {
+  .supplier-form-grid,
+  .auth-form-grid {
     grid-template-columns: 1fr;
   }
 

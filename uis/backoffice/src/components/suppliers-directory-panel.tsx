@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_INCIDENTS_API_URL || "http://localhost:8001";
+import { useAuth } from "@/lib/auth-context";
 
 const countryOptions = ["USA", "Spain"] as const;
 const categoryOptions = [
@@ -93,8 +93,10 @@ function normalizeOptionalValue(value: string) {
   return normalized ? normalized : undefined;
 }
 
-async function requestSuppliers(country: string, category: string) {
-  const response = await fetch(`${API_BASE_URL}/suppliers${buildQuery(country, category)}`, {
+type AuthFetch = (path: string, options?: RequestInit) => Promise<Response>;
+
+async function requestSuppliers(authFetch: AuthFetch, country: string, category: string) {
+  const response = await authFetch(`/suppliers${buildQuery(country, category)}`, {
     cache: "no-store",
   });
   const data = await response.json();
@@ -107,6 +109,7 @@ async function requestSuppliers(country: string, category: string) {
 }
 
 export function SuppliersDirectoryPanel() {
+  const { authFetch } = useAuth();
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [selectedCountry, setSelectedCountry] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
@@ -123,7 +126,7 @@ export function SuppliersDirectoryPanel() {
     setFeedbackError(null);
 
     try {
-      const nextSuppliers = await requestSuppliers(country, category);
+      const nextSuppliers = await requestSuppliers(authFetch, country, category);
       setSuppliers(nextSuppliers);
       setRateDrafts(
         Object.fromEntries(nextSuppliers.map((supplier) => [supplier.id, supplier.rate_per_shipment.toFixed(2)]))
@@ -143,7 +146,7 @@ export function SuppliersDirectoryPanel() {
         setFeedbackError(null);
 
         try {
-          const nextSuppliers = await requestSuppliers(selectedCountry, selectedCategory);
+          const nextSuppliers = await requestSuppliers(authFetch, selectedCountry, selectedCategory);
           setSuppliers(nextSuppliers);
           setRateDrafts(
             Object.fromEntries(nextSuppliers.map((supplier) => [supplier.id, supplier.rate_per_shipment.toFixed(2)]))
@@ -158,7 +161,7 @@ export function SuppliersDirectoryPanel() {
     }, 0);
 
     return () => window.clearTimeout(timerId);
-  }, [selectedCountry, selectedCategory]);
+  }, [selectedCountry, selectedCategory, authFetch]);
 
   const activeCount = useMemo(
     () => suppliers.filter((supplier) => supplier.status === "active").length,
@@ -211,7 +214,7 @@ export function SuppliersDirectoryPanel() {
     };
 
     try {
-      const response = await fetch(`${API_BASE_URL}/suppliers`, {
+      const response = await authFetch("/suppliers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -240,7 +243,7 @@ export function SuppliersDirectoryPanel() {
     setFeedbackSuccess(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/suppliers/${supplierId}/rate`, {
+      const response = await authFetch(`/suppliers/${supplierId}/rate`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rate_per_shipment: draftValue }),
@@ -270,7 +273,7 @@ export function SuppliersDirectoryPanel() {
     setFeedbackSuccess(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/suppliers/${supplier.id}/status`, {
+      const response = await authFetch(`/suppliers/${supplier.id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
