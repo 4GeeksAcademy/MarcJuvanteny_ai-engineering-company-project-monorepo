@@ -16,15 +16,19 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from auth_service import authenticate_user, create_access_token, get_user_from_token
+from auth_service import authenticate_user, create_access_token, get_user_from_token, verify_password
 from incident_analysis import CSVInputError, read_csv_text, summarize_rows, summary_to_csv_text
 from models import (
     AuthMeProfile,
     AuthMeResponse,
+    ChangePasswordRequest,
+    ForgotPasswordRequest,
     LoginRequest,
+    MessageResponse,
     SupplierCreate,
     ProfileRecord,
     ProfileUpdate,
+    ResetPasswordRequest,
     SupplierRateUpdate,
     SupplierRecord,
     SupplierResponse,
@@ -37,6 +41,7 @@ from models import (
     VALID_CATEGORIES,
     VALID_COUNTRIES,
 )
+from password_reset_service import confirm_password_reset, request_password_reset
 from user_service import (
     create_user as create_user_service,
     delete_user as delete_user_service,
@@ -335,6 +340,30 @@ async def auth_me(current_user: UserWithProfileRecord = Depends(get_current_user
         role=current_user.role,
         profile=profile_payload,
     )
+
+
+@app.post("/auth/forgot-password", response_model=MessageResponse)
+async def forgot_password(payload: ForgotPasswordRequest) -> MessageResponse:
+    request_password_reset(get_suppliers_db_path(), payload.email)
+    return MessageResponse(message="Si esa direccion esta registrada, recibiras un enlace de restablecimiento en breve.")
+
+
+@app.post("/auth/reset-password", response_model=MessageResponse)
+async def reset_password(payload: ResetPasswordRequest) -> MessageResponse:
+    confirm_password_reset(get_suppliers_db_path(), payload.token, payload.new_password)
+    return MessageResponse(message="Contrasena actualizada correctamente.")
+
+
+@app.post("/auth/change-password", response_model=MessageResponse)
+async def change_password(
+    payload: ChangePasswordRequest,
+    current_user: UserWithProfileRecord = Depends(get_current_user),
+) -> MessageResponse:
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="La contrasena actual es incorrecta.")
+
+    update_user_service(get_suppliers_db_path(), current_user.id, UserCredentialsUpdate(password=payload.new_password))
+    return MessageResponse(message="Contrasena actualizada correctamente.")
 
 
 @app.post("/api/incidents/analyze")

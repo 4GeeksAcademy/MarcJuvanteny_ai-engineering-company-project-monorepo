@@ -245,6 +245,43 @@ class TokenResponse(BaseModel):
     expires_in: int = Field(gt=0)
 
 
+class ForgotPasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, validate_assignment=True)
+
+    email: str = Field(min_length=5)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
+            raise ValueError("email must be a valid address")
+        local_part, domain_part = normalized.split("@", 1)
+        if not local_part or "." not in domain_part:
+            raise ValueError("email must be a valid address")
+        return normalized
+
+
+class ResetPasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    token: str = Field(min_length=10)
+    new_password: str = Field(min_length=8)
+
+
+class ChangePasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    current_password: str = Field(min_length=8)
+    new_password: str = Field(min_length=8)
+
+
+class MessageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message: str
+
+
 class AuthMeProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
