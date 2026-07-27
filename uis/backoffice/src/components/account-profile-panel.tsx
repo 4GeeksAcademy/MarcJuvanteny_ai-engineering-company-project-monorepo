@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 
 import { extractErrorMessage } from "@/lib/api-errors";
 import { useAuth } from "@/lib/auth-context";
@@ -62,6 +63,9 @@ export function AccountProfilePanel() {
         <h2 className="panel-title">Datos de sesion</h2>
         <p className="section-caption">
           Email: <strong>{user?.email}</strong> · Rol: <strong>{user?.role}</strong>
+        </p>
+        <p className="section-caption">
+          <Link href="/account/change-password">Cambiar contrasena</Link>
         </p>
       </section>
 

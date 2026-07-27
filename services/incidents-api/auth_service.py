@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,22 @@ def get_access_token_expire_minutes() -> int:
 
     if minutes <= 0:
         raise HTTPException(status_code=500, detail="ACCESS_TOKEN_EXPIRE_MINUTES must be greater than zero.")
+
+    return minutes
+
+
+def get_reset_token_expire_minutes() -> int:
+    raw_value = os.environ.get("RESET_TOKEN_EXPIRE_MINUTES", "30")
+    try:
+        minutes = int(raw_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="RESET_TOKEN_EXPIRE_MINUTES must be an integer.") from exc
+
+    if not (15 <= minutes <= 60):
+        raise HTTPException(
+            status_code=500,
+            detail="RESET_TOKEN_EXPIRE_MINUTES must be between 15 and 60.",
+        )
 
     return minutes
 
@@ -93,6 +110,38 @@ def decode_access_token(token: str) -> dict[str, Any]:
             detail="Invalid or expired access token.",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
+
+    return payload
+
+
+def create_password_reset_token(user_id: int) -> tuple[str, str, datetime]:
+    expires_minutes = get_reset_token_expire_minutes()
+    expire_at = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
+    jti = secrets.token_hex(16)
+
+    payload = {
+        "sub": str(user_id),
+        "purpose": "password_reset",
+        "jti": jti,
+        "exp": expire_at,
+        "iat": datetime.now(timezone.utc),
+    }
+
+    token = jwt.encode(payload, _get_jwt_secret(), algorithm=ALGORITHM)
+    return token, jti, expire_at
+
+
+def decode_password_reset_token(token: str) -> dict[str, Any]:
+    try:
+        payload = jwt.decode(token, _get_jwt_secret(), algorithms=[ALGORITHM])
+    except InvalidTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired token.",
+        ) from exc
+
+    if payload.get("purpose") != "password_reset":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token.")
 
     return payload
 
