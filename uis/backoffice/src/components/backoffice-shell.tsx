@@ -7,7 +7,8 @@ import { useAuth } from "@/lib/auth-context";
 
 const navItems = [
   { href: "/", label: "Resumen", key: "summary" },
-  { href: "/incidents-analysis", label: "Incidencias", key: "incidents" },
+  { href: "/incidents-analysis", label: "Analisis de incidencias", key: "incidents" },
+  { href: "/incidents", label: "Gestion de incidencias", key: "incidents-management" },
   { href: "/suppliers", label: "Proveedores", key: "suppliers" },
   { href: "/account/profile", label: "Mi cuenta", key: "account" },
   { href: "#", label: "Candidatos", key: "candidates" },
