@@ -20,10 +20,39 @@ VALID_CATEGORIES = [
 VALID_COUNTRIES = ["USA", "Spain"]
 COUNTRY_CURRENCY_MAP = {"USA": "USD", "Spain": "EUR"}
 
+# Only 3 of the 9 Hito 10 incident categories are confirmed in memory-bank/progress.md.
+# Extend this list once the remaining 6 are defined in the real Hito 10 CONTEXT.
+VALID_INCIDENT_CATEGORIES = [
+    "lost_parcel",
+    "carrier_issue",
+    "inventory_discrepancy",
+]
+
+VALID_BRANCHES = [
+    "la_warehouse",
+    "la_office",
+    "zaragoza_warehouse",
+    "zaragoza_office",
+    "central",
+]
+
 
 class SupplierStatus(StrEnum):
     ACTIVE = "active"
     SUSPENDED = "suspended"
+
+
+class IncidentStatus(StrEnum):
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    RESOLVED = "resolved"
+    DISCARDED = "discarded"
+
+
+class IncidentOrigin(StrEnum):
+    CUSTOMER = "customer"
+    BRANCH = "branch"
+    INTERNAL = "internal"
 
 
 class UserRole(StrEnum):
@@ -33,6 +62,19 @@ class UserRole(StrEnum):
 
 
 VALID_STATUSES = [status.value for status in SupplierStatus]
+VALID_INCIDENT_STATUSES = [status.value for status in IncidentStatus]
+VALID_INCIDENT_ORIGINS = [origin.value for origin in IncidentOrigin]
+
+INCIDENT_STATUS_TRANSITIONS: dict[IncidentStatus, set[IncidentStatus]] = {
+    IncidentStatus.OPEN: {IncidentStatus.IN_PROGRESS, IncidentStatus.DISCARDED},
+    IncidentStatus.IN_PROGRESS: {IncidentStatus.RESOLVED, IncidentStatus.DISCARDED},
+    IncidentStatus.RESOLVED: set(),
+    IncidentStatus.DISCARDED: set(),
+}
+
+
+def is_valid_incident_status_transition(current: IncidentStatus, target: IncidentStatus) -> bool:
+    return target in INCIDENT_STATUS_TRANSITIONS[current]
 
 
 class SupplierBase(BaseModel):
@@ -111,6 +153,66 @@ class SupplierStatusUpdate(BaseModel):
 
 
 Supplier = SupplierRecord
+
+
+class IncidentBase(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, validate_assignment=True)
+
+    valid_categories: ClassVar[set[str]] = set(VALID_INCIDENT_CATEGORIES)
+    valid_branches: ClassVar[set[str]] = set(VALID_BRANCHES)
+
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    category: str
+    origin: IncidentOrigin
+    branch: str
+
+    @field_validator("category")
+    @classmethod
+    def validate_category(cls, value: str) -> str:
+        if value not in cls.valid_categories:
+            raise ValueError(f"category must be one of: {sorted(cls.valid_categories)}")
+        return value
+
+    @field_validator("branch")
+    @classmethod
+    def validate_branch(cls, value: str) -> str:
+        if value not in cls.valid_branches:
+            raise ValueError(f"branch must be one of: {sorted(cls.valid_branches)}")
+        return value
+
+
+class IncidentCreate(IncidentBase):
+    pass
+
+
+class IncidentResponse(IncidentBase):
+    status: IncidentStatus = IncidentStatus.OPEN
+    source_incident_id: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class IncidentRecord(IncidentResponse):
+    id: int = Field(gt=0)
+
+
+class IncidentStatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: IncidentStatus
+
+
+class IncidentSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    by_status: dict[str, int]
+    by_category: dict[str, int]
+    by_origin: dict[str, int]
+    by_branch: dict[str, int]
+
+
+Incident = IncidentRecord
 
 
 class UserBase(BaseModel):
