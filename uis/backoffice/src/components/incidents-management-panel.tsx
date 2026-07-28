@@ -133,18 +133,18 @@ async function requestIncidents(authFetch: AuthFetch, status: string, origin: st
   const response = await authFetch(`/api/incidents${buildIncidentsQuery(status, origin, branch)}`, {
     cache: "no-store",
   });
-  const data = await response.json();
+  const data = await response.json().catch(() => null);
 
   if (!response.ok) {
     throw new Error(getGeneralErrorMessage(data, "No se pudo cargar el listado de incidencias."));
   }
 
-  return data as IncidentRecord[];
+  return (data ?? []) as IncidentRecord[];
 }
 
 async function requestSummary(authFetch: AuthFetch) {
   const response = await authFetch("/api/incidents/summary", { cache: "no-store" });
-  const data = await response.json();
+  const data = await response.json().catch(() => null);
 
   if (!response.ok) {
     throw new Error(getGeneralErrorMessage(data, "No se pudieron cargar las metricas de incidencias."));
@@ -227,10 +227,10 @@ export function IncidentsManagementPanel() {
   const summaryRows = useMemo(() => {
     if (!summary) return null;
     return {
-      status: statusOptions.map((status) => ({ key: status, label: statusLabels[status], count: summary.by_status[status] ?? 0 })),
-      category: categoryOptions.map((category) => ({ key: category, label: categoryLabels[category], count: summary.by_category[category] ?? 0 })),
-      origin: originOptions.map((origin) => ({ key: origin, label: originLabels[origin], count: summary.by_origin[origin] ?? 0 })),
-      branch: branchOptions.map((branch) => ({ key: branch, label: branchLabels[branch], count: summary.by_branch[branch] ?? 0 })),
+      status: statusOptions.map((status) => ({ key: status, label: statusLabels[status], count: summary.by_status?.[status] ?? 0 })),
+      category: categoryOptions.map((category) => ({ key: category, label: categoryLabels[category], count: summary.by_category?.[category] ?? 0 })),
+      origin: originOptions.map((origin) => ({ key: origin, label: originLabels[origin], count: summary.by_origin?.[origin] ?? 0 })),
+      branch: branchOptions.map((branch) => ({ key: branch, label: branchLabels[branch], count: summary.by_branch?.[branch] ?? 0 })),
     };
   }, [summary]);
 
@@ -255,7 +255,7 @@ export function IncidentsManagementPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
 
       if (!response.ok) {
         const field = data && typeof data === "object" ? (data as ApiErrorPayload).field : undefined;
@@ -290,7 +290,7 @@ export function IncidentsManagementPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
 
       if (!response.ok) {
         setIncidents((current) => current.map((item) => (item.id === incident.id ? { ...item, status: previousStatus } : item)));
@@ -330,7 +330,14 @@ export function IncidentsManagementPanel() {
         </div>
 
         {isSummaryLoading ? <p className="empty-state-inline">Cargando metricas...</p> : null}
-        {!isSummaryLoading && summaryError ? <p className="feedback-error">{summaryError}</p> : null}
+        {!isSummaryLoading && summaryError ? (
+          <p className="feedback-error">
+            {summaryError}{" "}
+            <button type="button" className="secondary-button compact-button" onClick={() => void refreshSummary()}>
+              Reintentar
+            </button>
+          </p>
+        ) : null}
 
         {!isSummaryLoading && summaryRows ? (
           <div className="suppliers-summary-strip" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
@@ -486,7 +493,7 @@ export function IncidentsManagementPanel() {
                 );
               })}
 
-              {!isListLoading && !incidents.length ? (
+              {!isListLoading && !listError && !incidents.length ? (
                 <tr>
                   <td colSpan={7}>
                     <div className="empty-state-inline">No hay incidencias para los filtros seleccionados.</div>
