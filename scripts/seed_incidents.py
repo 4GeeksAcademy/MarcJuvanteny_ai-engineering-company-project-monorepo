@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import os
 import sys
 from datetime import datetime, timezone
@@ -108,10 +109,21 @@ def main() -> None:
     db_path = Path(raw_db_path) if raw_db_path else DEFAULT_DB_PATH
 
     if not csv_path.exists():
-        print(f"CSV file not found at {csv_path}. Set INCIDENTS_CSV_PATH to point at the historical CSV.")
-        return
+        print(
+            f"CSV file not found at {csv_path}. Set INCIDENTS_CSV_PATH to point at the historical CSV.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
-    inserted_count, skipped_count = seed_incidents(csv_path, db_path)
+    try:
+        inserted_count, skipped_count = seed_incidents(csv_path, db_path)
+    except OSError as exc:
+        print(f"Could not read the CSV file or write the database: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except csv.Error as exc:
+        print(f"The CSV file at {csv_path} is malformed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     print(f"Seeded {inserted_count} incidents into {db_path} ({skipped_count} invalid rows skipped).")
 
 

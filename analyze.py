@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -82,17 +83,17 @@ def load_rows(csv_path: Path, engine: str) -> tuple[list[dict[str, str]], str]:
 
 def analyze(csv_path: Path, engine: str) -> int:
     if not csv_path.exists() or not csv_path.is_file():
-        print(f"Error: file not found: {csv_path}")
+        print(f"Error: file not found: {csv_path}", file=sys.stderr)
         return 1
 
     if csv_path.suffix.lower() != ".csv":
-        print(f"Error: expected a .csv file, received: {csv_path.name}")
+        print(f"Error: expected a .csv file, received: {csv_path.name}", file=sys.stderr)
         return 1
 
     try:
         rows, selected_engine = load_rows(csv_path, engine)
     except Exception as exc:
-        print(f"Error: unable to read CSV: {exc}")
+        print(f"Error: unable to read CSV: {exc}", file=sys.stderr)
         return 1
 
     if not rows:
@@ -146,7 +147,11 @@ def analyze(csv_path: Path, engine: str) -> int:
     answer = input("\nDesea exportar los resultados a CSV? [s/n]: ").strip().lower()
     if answer == "s":
         output_path = Path("results.csv")
-        export_results_csv(output_path, summary)
+        try:
+            export_results_csv(output_path, summary)
+        except OSError as exc:
+            print(f"Error: no se pudo escribir el fichero de resultados: {exc}", file=sys.stderr)
+            return 1
         print(f"Resultados exportados en: {output_path.resolve()}")
     else:
         print("Exportacion omitida.")
