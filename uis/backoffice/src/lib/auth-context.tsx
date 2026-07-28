@@ -93,7 +93,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers.set("Authorization", `Bearer ${token}`);
     }
 
-    const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+    } catch {
+      throw new Error("No se pudo conectar con el servidor. Verifica tu conexion e intentalo de nuevo.");
+    }
 
     if (response.status === 401) {
       clearStoredToken();
@@ -106,11 +111,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string): Promise<void> => {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
+      let response: Response;
+      try {
+        response = await fetch(`${API_BASE_URL}/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+      } catch {
+        throw new Error("No se pudo conectar con el servidor. Verifica tu conexion e intentalo de nuevo.");
+      }
 
       const data = await parseJsonSafely(response);
       if (!response.ok) {

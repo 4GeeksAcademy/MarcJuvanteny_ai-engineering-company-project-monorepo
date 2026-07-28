@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import urllib.error
 import urllib.request
 
@@ -70,4 +71,7 @@ def send_password_reset_email(to_email: str, reset_link: str) -> None:
         with urllib.request.urlopen(request, timeout=10) as response:
             response.read()
     except urllib.error.URLError as exc:
-        print(f"[email_service] No se pudo enviar el email de restablecimiento a {to_email}: {exc}")
+        print(
+            f"[email_service] No se pudo enviar el email de restablecimiento a {to_email}: {exc}",
+            file=sys.stderr,
+        )

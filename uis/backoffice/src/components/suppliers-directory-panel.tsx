@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
+import { extractErrorMessage } from "@/lib/api-errors";
 import { useAuth } from "@/lib/auth-context";
 
 const countryOptions = ["USA", "Spain"] as const;
@@ -99,13 +100,13 @@ async function requestSuppliers(authFetch: AuthFetch, country: string, category:
   const response = await authFetch(`/suppliers${buildQuery(country, category)}`, {
     cache: "no-store",
   });
-  const data = await response.json();
+  const data = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(data.detail || "No se pudo cargar el directorio de proveedores.");
+    throw new Error(extractErrorMessage(data, "No se pudo cargar el directorio de proveedores."));
   }
 
-  return data as SupplierRecord[];
+  return (data ?? []) as SupplierRecord[];
 }
 
 export function SuppliersDirectoryPanel() {
@@ -115,6 +116,7 @@ export function SuppliersDirectoryPanel() {
   const [selectedCategory, setSelectedCategory] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
   const [formState, setFormState] = useState<FormState>(initialFormState);
@@ -123,7 +125,7 @@ export function SuppliersDirectoryPanel() {
 
   async function refreshSuppliers(country = selectedCountry, category = selectedCategory) {
     setIsLoading(true);
-    setFeedbackError(null);
+    setListError(null);
 
     try {
       const nextSuppliers = await requestSuppliers(authFetch, country, category);
@@ -133,7 +135,7 @@ export function SuppliersDirectoryPanel() {
       );
     } catch (error) {
       setSuppliers([]);
-      setFeedbackError(error instanceof Error ? error.message : "No se pudo conectar con la API de proveedores.");
+      setListError(error instanceof Error ? error.message : "No se pudo conectar con la API de proveedores.");
     } finally {
       setIsLoading(false);
     }
@@ -141,26 +143,11 @@ export function SuppliersDirectoryPanel() {
 
   useEffect(() => {
     const timerId = window.setTimeout(() => {
-      void (async () => {
-        setIsLoading(true);
-        setFeedbackError(null);
-
-        try {
-          const nextSuppliers = await requestSuppliers(authFetch, selectedCountry, selectedCategory);
-          setSuppliers(nextSuppliers);
-          setRateDrafts(
-            Object.fromEntries(nextSuppliers.map((supplier) => [supplier.id, supplier.rate_per_shipment.toFixed(2)]))
-          );
-        } catch (error) {
-          setSuppliers([]);
-          setFeedbackError(error instanceof Error ? error.message : "No se pudo conectar con la API de proveedores.");
-        } finally {
-          setIsLoading(false);
-        }
-      })();
+      void refreshSuppliers(selectedCountry, selectedCategory);
     }, 0);
 
     return () => window.clearTimeout(timerId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCountry, selectedCategory, authFetch]);
 
   const activeCount = useMemo(
@@ -220,9 +207,9 @@ export function SuppliersDirectoryPanel() {
         body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
       if (!response.ok) {
-        setFeedbackError(data.detail || "La API rechazo el alta del proveedor.");
+        setFeedbackError(extractErrorMessage(data, "La API rechazo el alta del proveedor."));
         return;
       }
 
@@ -248,10 +235,10 @@ export function SuppliersDirectoryPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rate_per_shipment: draftValue }),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
 
       if (!response.ok) {
-        setFeedbackError(data.detail || "No se pudo actualizar la tarifa.");
+        setFeedbackError(extractErrorMessage(data, "No se pudo actualizar la tarifa."));
         return;
       }
 
@@ -278,10 +265,10 @@ export function SuppliersDirectoryPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
 
       if (!response.ok) {
-        setFeedbackError(data.detail || "No se pudo cambiar el estado del proveedor.");
+        setFeedbackError(extractErrorMessage(data, "No se pudo cambiar el estado del proveedor."));
         return;
       }
 
@@ -362,6 +349,14 @@ export function SuppliersDirectoryPanel() {
           <div className="summary-pill">{isLoading ? "Cargando..." : `${suppliers.length} proveedores`}</div>
         </div>
 
+        {listError ? (
+          <p className="feedback-error">
+            {listError}{" "}
+            <button type="button" className="secondary-button compact-button" onClick={() => void refreshSuppliers()}>
+              Reintentar
+            </button>
+          </p>
+        ) : null}
         {feedbackError ? <p className="feedback-error">{feedbackError}</p> : null}
         {feedbackSuccess ? <p className="feedback-success">{feedbackSuccess}</p> : null}
 
@@ -393,7 +388,7 @@ export function SuppliersDirectoryPanel() {
                     <td>{supplier.country}</td>
                     <td>
                       <div className="category-chip-list">
-                        {supplier.categories.map((category) => (
+                        {(supplier.categories ?? []).map((category) => (
                           <span key={category} className="category-chip">{category}</span>
                         ))}
                       </div>
@@ -427,7 +422,7 @@ export function SuppliersDirectoryPanel() {
                 );
               })}
 
-              {!isLoading && !suppliers.length ? (
+              {!isLoading && !listError && !suppliers.length ? (
                 <tr>
                   <td colSpan={6}>
                     <div className="empty-state-inline">No hay proveedores para los filtros seleccionados.</div>

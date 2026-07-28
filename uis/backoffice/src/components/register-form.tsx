@@ -51,17 +51,22 @@ export function RegisterForm() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/users`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: formState.email,
-          password: formState.password,
-          name: formState.name || undefined,
-          phone: formState.phone || undefined,
-          address: formState.address || undefined,
-        }),
-      });
+      let response: Response;
+      try {
+        response = await fetch(`${API_BASE_URL}/users`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: formState.email,
+            password: formState.password,
+            name: formState.name || undefined,
+            phone: formState.phone || undefined,
+            address: formState.address || undefined,
+          }),
+        });
+      } catch {
+        throw new Error("No se pudo conectar con el servidor. Verifica tu conexion e intentalo de nuevo.");
+      }
 
       const data = await response.json().catch(() => null);
 
