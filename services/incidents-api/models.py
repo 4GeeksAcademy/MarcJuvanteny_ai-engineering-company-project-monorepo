@@ -5,6 +5,7 @@ from enum import StrEnum
 from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, field_validator, model_validator
+from sqlmodel import Field as SQLField, SQLModel
 
 VALID_CATEGORIES = [
     "carrier_last_mile",
@@ -35,6 +36,36 @@ VALID_BRANCHES = [
     "zaragoza_office",
     "central",
 ]
+
+
+class SKU(SQLModel, table=True):
+    id: int | None = SQLField(default=None, primary_key=True)
+    name: str
+    sku: str = SQLField(index=True)
+    client_name: str
+    category: str
+    warehouse: str
+
+
+class StockEntry(SQLModel, table=True):
+    id: int | None = SQLField(default=None, primary_key=True)
+    sku_id: int = SQLField(foreign_key="sku.id", index=True)
+    quantity: int
+    reference: str
+    warehouse: str
+    created_at: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
+    user_uuid: str
+
+
+class StockExit(SQLModel, table=True):
+    id: int | None = SQLField(default=None, primary_key=True)
+    sku_id: int = SQLField(foreign_key="sku.id", index=True)
+    quantity: int
+    exit_type: str
+    tracking_number: str | None = None
+    warehouse: str
+    created_at: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
+    user_uuid: str
 
 
 class SupplierStatus(StrEnum):

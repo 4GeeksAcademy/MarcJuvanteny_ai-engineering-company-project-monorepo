@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,12 +12,14 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from tinydb import TinyDB
 from tinydb.table import Document
+from sqlmodel import SQLModel, Session
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from auth_service import authenticate_user, create_access_token, get_user_from_token, verify_password
+from database import SQL_ENGINE, get_db, get_tinydb_path
 from incident_analysis import CSVInputError, read_csv_text, summarize_rows, summary_to_csv_text
 from models import (
     AuthMeProfile,
@@ -55,6 +56,7 @@ from models import (
     is_valid_incident_status_transition,
 )
 from password_reset_service import confirm_password_reset, request_password_reset
+from routers.inventory import router as inventory_router, seed_inventory_if_empty
 from user_service import (
     create_user as create_user_service,
     delete_user as delete_user_service,
@@ -68,7 +70,8 @@ from user_service import (
 
 app = FastAPI(title="Incidents API", version="0.1.0")
 LAST_ANALYSIS_SUMMARY: dict[str, Any] | None = None
-DEFAULT_SUPPLIERS_DB_PATH = Path(__file__).resolve().parent / "suppliers.json"
+# Keep a module-level reference so the Supabase SQLModel engine is initialized at startup.
+SUPABASE_SQL_ENGINE = SQL_ENGINE
 bearer_scheme = HTTPBearer(auto_error=False)
 
 app.add_middleware(
@@ -82,6 +85,15 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+app.include_router(inventory_router)
+
+
+@app.on_event("startup")
+async def initialize_supabase_schema() -> None:
+    SQLModel.metadata.create_all(SUPABASE_SQL_ENGINE)
+    with Session(SUPABASE_SQL_ENGINE) as session:
+        seed_inventory_if_empty(session)
 
 
 @app.exception_handler(RequestValidationError)
@@ -101,8 +113,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 def get_suppliers_db_path() -> Path:
-    raw_path = os.environ.get("TINYDB_PATH")
-    return Path(raw_path) if raw_path else DEFAULT_SUPPLIERS_DB_PATH
+    return get_tinydb_path()
 
 
 def get_current_user(
@@ -183,8 +194,9 @@ async def list_suppliers(
     country: str | None = Query(default=None),
     category: str | None = Query(default=None),
     current_user: UserWithProfileRecord = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> list[SupplierRecord]:
-    _ = current_user
+    _ = current_user, db
     validate_supplier_filters(country, category)
 
     with TinyDB(get_suppliers_db_path()) as db:
