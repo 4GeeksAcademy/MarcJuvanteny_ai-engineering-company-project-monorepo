@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from tinydb import Query, TinyDB
@@ -205,7 +206,13 @@ def seed_suppliers(db_path: Path) -> int:
 def main() -> None:
     raw_path = os.environ.get("TINYDB_PATH")
     db_path = Path(raw_path) if raw_path else DEFAULT_DB_PATH
-    inserted_count = seed_suppliers(db_path)
+
+    try:
+        inserted_count = seed_suppliers(db_path)
+    except OSError as exc:
+        print(f"Could not write to the suppliers database at {db_path}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     print(f"Seeded {inserted_count} suppliers into {db_path}")
 
 

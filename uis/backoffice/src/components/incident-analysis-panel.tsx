@@ -74,10 +74,10 @@ export function IncidentAnalysisPanel() {
         body: payload,
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
       if (!response.ok) {
         setSummary(null);
-        setErrorMessage(data.detail || "No se pudo analizar el fichero.");
+        setErrorMessage(data?.detail || "No se pudo analizar el fichero.");
         return;
       }
 

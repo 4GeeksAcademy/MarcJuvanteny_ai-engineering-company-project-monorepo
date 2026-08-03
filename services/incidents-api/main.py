@@ -6,8 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile, status
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from tinydb import TinyDB
 from tinydb.table import Document
@@ -23,6 +25,12 @@ from models import (
     AuthMeResponse,
     ChangePasswordRequest,
     ForgotPasswordRequest,
+    IncidentCreate,
+    IncidentRecord,
+    IncidentResponse,
+    IncidentStatus,
+    IncidentStatusUpdate,
+    IncidentSummary,
     LoginRequest,
     MessageResponse,
     SupplierCreate,
@@ -38,8 +46,13 @@ from models import (
     UserRegister,
     UserRole,
     UserWithProfileRecord,
+    VALID_BRANCHES,
     VALID_CATEGORIES,
     VALID_COUNTRIES,
+    VALID_INCIDENT_CATEGORIES,
+    VALID_INCIDENT_ORIGINS,
+    VALID_INCIDENT_STATUSES,
+    is_valid_incident_status_transition,
 )
 from password_reset_service import confirm_password_reset, request_password_reset
 from user_service import (
@@ -69,6 +82,22 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    _ = request
+    errors = exc.errors()
+    first_error = errors[0] if errors else None
+    field = str(first_error["loc"][-1]) if first_error and first_error.get("loc") else "unknown"
+    message = first_error["msg"] if first_error else "Invalid request payload."
+    return JSONResponse(status_code=400, content={"detail": message, "field": field})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    _ = request, exc
+    return JSONResponse(status_code=500, content={"detail": "An unexpected error occurred. Please try again later."})
 
 
 def get_suppliers_db_path() -> Path:
@@ -240,6 +269,151 @@ async def delete_supplier(
         suppliers_table.remove(doc_ids=[supplier_id])
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def incident_document_to_record(document: Document) -> IncidentRecord:
+    payload = dict(document)
+    payload["id"] = document.doc_id
+    return IncidentRecord(**payload)
+
+
+def get_incident_document_or_404(incident_id: int) -> Document:
+    with TinyDB(get_suppliers_db_path()) as db:
+        incidents_table = db.table("incidents")
+        document = incidents_table.get(doc_id=incident_id)
+
+    if document is None:
+        raise HTTPException(status_code=404, detail="Incident not found.")
+
+    return document
+
+
+def validate_incident_filters(
+    status_filter: str | None,
+    origin_filter: str | None,
+    branch_filter: str | None,
+    category_filter: str | None,
+) -> None:
+    if status_filter is not None and status_filter not in VALID_INCIDENT_STATUSES:
+        raise HTTPException(status_code=400, detail=f"status must be one of: {VALID_INCIDENT_STATUSES}")
+
+    if origin_filter is not None and origin_filter not in VALID_INCIDENT_ORIGINS:
+        raise HTTPException(status_code=400, detail=f"origin must be one of: {VALID_INCIDENT_ORIGINS}")
+
+    if branch_filter is not None and branch_filter not in VALID_BRANCHES:
+        raise HTTPException(status_code=400, detail=f"branch must be one of: {VALID_BRANCHES}")
+
+    if category_filter is not None and category_filter not in VALID_INCIDENT_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"category must be one of: {VALID_INCIDENT_CATEGORIES}")
+
+
+@app.post("/api/incidents", response_model=IncidentRecord, status_code=status.HTTP_201_CREATED)
+async def create_incident(
+    payload: IncidentCreate,
+    current_user: UserWithProfileRecord = Depends(get_current_user),
+) -> IncidentRecord:
+    _ = current_user
+    incident = IncidentResponse(**payload.model_dump())
+    incident_data = incident.model_dump(mode="json")
+
+    with TinyDB(get_suppliers_db_path()) as db:
+        incidents_table = db.table("incidents")
+        doc_id = incidents_table.insert(incident_data)
+        created_document = incidents_table.get(doc_id=doc_id)
+
+    return incident_document_to_record(created_document)
+
+
+@app.get("/api/incidents", response_model=list[IncidentRecord])
+async def list_incidents(
+    status_filter: str | None = Query(default=None, alias="status"),
+    origin: str | None = Query(default=None),
+    branch: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    current_user: UserWithProfileRecord = Depends(get_current_user),
+) -> list[IncidentRecord]:
+    _ = current_user
+    validate_incident_filters(status_filter, origin, branch, category)
+
+    with TinyDB(get_suppliers_db_path()) as db:
+        incidents_table = db.table("incidents")
+        documents = incidents_table.all()
+
+    filtered_documents: list[Document] = []
+    for document in documents:
+        if status_filter is not None and document.get("status") != status_filter:
+            continue
+        if origin is not None and document.get("origin") != origin:
+            continue
+        if branch is not None and document.get("branch") != branch:
+            continue
+        if category is not None and document.get("category") != category:
+            continue
+        filtered_documents.append(document)
+
+    return [incident_document_to_record(document) for document in filtered_documents]
+
+
+@app.get("/api/incidents/summary", response_model=IncidentSummary)
+async def get_incidents_summary(
+    current_user: UserWithProfileRecord = Depends(get_current_user),
+) -> IncidentSummary:
+    _ = current_user
+
+    with TinyDB(get_suppliers_db_path()) as db:
+        incidents_table = db.table("incidents")
+        documents = incidents_table.all()
+
+    by_status: dict[str, int] = {value: 0 for value in VALID_INCIDENT_STATUSES}
+    by_category: dict[str, int] = {value: 0 for value in VALID_INCIDENT_CATEGORIES}
+    by_origin: dict[str, int] = {value: 0 for value in VALID_INCIDENT_ORIGINS}
+    by_branch: dict[str, int] = {value: 0 for value in VALID_BRANCHES}
+
+    for document in documents:
+        by_status[document["status"]] = by_status.get(document["status"], 0) + 1
+        by_category[document["category"]] = by_category.get(document["category"], 0) + 1
+        by_origin[document["origin"]] = by_origin.get(document["origin"], 0) + 1
+        by_branch[document["branch"]] = by_branch.get(document["branch"], 0) + 1
+
+    return IncidentSummary(by_status=by_status, by_category=by_category, by_origin=by_origin, by_branch=by_branch)
+
+
+@app.get("/api/incidents/{incident_id}", response_model=IncidentRecord)
+async def get_incident(
+    incident_id: int,
+    current_user: UserWithProfileRecord = Depends(get_current_user),
+) -> IncidentRecord:
+    _ = current_user
+    document = get_incident_document_or_404(incident_id)
+    return incident_document_to_record(document)
+
+
+@app.patch("/api/incidents/{incident_id}/status", response_model=IncidentRecord)
+async def update_incident_status(
+    incident_id: int,
+    payload: IncidentStatusUpdate,
+    current_user: UserWithProfileRecord = Depends(get_current_user),
+) -> IncidentRecord:
+    _ = current_user
+    document = get_incident_document_or_404(incident_id)
+    current_status = IncidentStatus(document["status"])
+
+    if not is_valid_incident_status_transition(current_status, payload.status):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot transition incident from '{current_status.value}' to '{payload.status.value}'.",
+        )
+
+    updated_at = datetime.now(timezone.utc).isoformat()
+    with TinyDB(get_suppliers_db_path()) as db:
+        incidents_table = db.table("incidents")
+        incidents_table.update(
+            {"status": payload.status.value, "updated_at": updated_at},
+            doc_ids=[incident_id],
+        )
+        updated_document = incidents_table.get(doc_id=incident_id)
+
+    return incident_document_to_record(updated_document)
 
 
 @app.post("/users", response_model=UserWithProfileRecord, status_code=status.HTTP_201_CREATED)

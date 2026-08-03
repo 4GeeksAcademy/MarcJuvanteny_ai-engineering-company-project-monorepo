@@ -595,6 +595,33 @@ body {
   justify-content: flex-start;
 }
 
+.status-badge-open {
+  background: #eef5fc;
+  color: #25527d;
+}
+
+.status-badge-in-progress {
+  background: #fff2e6;
+  color: var(--warn);
+}
+
+.status-badge-resolved {
+  background: #e7f8f1;
+  color: var(--ok);
+}
+
+.status-badge-discarded {
+  background: #fdecea;
+  color: #b3261e;
+}
+
+.field-block-highlight {
+  border: 1px solid rgba(198, 103, 10, 0.4);
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: #fff8f0;
+}
+
 .topbar-row {
   display: flex;
   align-items: flex-start;
