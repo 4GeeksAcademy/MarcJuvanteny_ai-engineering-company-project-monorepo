@@ -704,6 +704,22 @@ body {
   font-weight: 600;
 }
 
+.field-warning {
+  color: #9a5700;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.movement-badge-inbound {
+  background: #e7f8f1;
+  color: var(--ok);
+}
+
+.movement-badge-outbound {
+  background: #fff2e6;
+  color: var(--warn);
+}
+
 @media (max-width: 980px) {
   .backoffice-shell {
     grid-template-columns: 1fr;

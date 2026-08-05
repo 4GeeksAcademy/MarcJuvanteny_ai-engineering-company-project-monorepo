@@ -52,11 +52,18 @@ export function InventoryOutboundOrderPanel() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const [quantityInlineError, setQuantityInlineError] = useState<string | null>(null);
 
   const selectedProduct = useMemo(
     () => products.find((product) => product.id === Number(formState.sku_id)) || null,
     [products, formState.sku_id]
   );
+
+  const requestedQuantity = Number(formState.quantity || 0);
+  const stockWarning =
+    selectedProduct && requestedQuantity > 0 && requestedQuantity > selectedProduct.current_stock
+      ? `La cantidad solicitada (${requestedQuantity}) supera el stock actual (${selectedProduct.current_stock}).`
+      : null;
 
   async function loadProducts() {
     setIsLoadingProducts(true);
@@ -93,6 +100,7 @@ export function InventoryOutboundOrderPanel() {
     event.preventDefault();
     setSubmitError(null);
     setSubmitSuccess(null);
+    setQuantityInlineError(null);
 
     if (!selectedProduct) {
       setSubmitError("Selecciona un producto valido antes de enviar.");
@@ -117,7 +125,11 @@ export function InventoryOutboundOrderPanel() {
       }));
       setSubmitSuccess(`Salida registrada correctamente para ${selectedProduct.name}.`);
     } catch (error) {
-      setSubmitError(getErrorMessage(error, "No se pudo crear la orden de salida."));
+      if (error instanceof InventoryApiError && error.status === 400) {
+        setQuantityInlineError(error.message);
+      } else {
+        setSubmitError(getErrorMessage(error, "No se pudo crear la orden de salida."));
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -178,6 +190,11 @@ export function InventoryOutboundOrderPanel() {
           </label>
 
           <label className="field-block">
+            <span>Stock actual</span>
+            <input type="text" value={selectedProduct ? String(selectedProduct.current_stock) : "-"} readOnly />
+          </label>
+
+          <label className="field-block">
             <span>Cantidad</span>
             <input
               type="number"
@@ -187,6 +204,8 @@ export function InventoryOutboundOrderPanel() {
               onChange={(event) => setFormState((current) => ({ ...current, quantity: event.target.value }))}
               required
             />
+            {stockWarning ? <span className="field-warning">{stockWarning}</span> : null}
+            {quantityInlineError ? <span className="field-error">{quantityInlineError}</span> : null}
           </label>
 
           <label className="field-block">

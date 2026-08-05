@@ -108,7 +108,12 @@ export function InventoryProductsPanel() {
             <h3 className="panel-title">Listado de productos</h3>
             <p className="section-caption">Incluye nombre, SKU, cliente, categoria, almacen y current_stock.</p>
           </div>
-          <div className="summary-pill">{isLoading ? "Cargando..." : `${products.length} productos`}</div>
+          <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
+            <Link href="/inventory/orders" className="secondary-button compact-button">
+              Ver historial de ordenes
+            </Link>
+            <div className="summary-pill">{isLoading ? "Cargando..." : `${products.length} productos`}</div>
+          </div>
         </div>
 
         {listError ? (
