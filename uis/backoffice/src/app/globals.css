@@ -547,6 +547,11 @@ body {
   gap: 0.55rem;
 }
 
+.row-actions-inline {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
 .compact-button {
   min-height: 38px;
   padding: 0.55rem 0.8rem;
@@ -613,6 +618,16 @@ body {
 .status-badge-discarded {
   background: #fdecea;
   color: #b3261e;
+}
+
+.status-badge-low-stock {
+  background: #fff2e6;
+  color: var(--warn);
+}
+
+.status-badge-healthy-stock {
+  background: #e7f8f1;
+  color: var(--ok);
 }
 
 .field-block-highlight {
