@@ -1,0 +1,43 @@
+services:
+  uis:
+    build:
+      context: ./uis
+      dockerfile: Dockerfile
+    working_dir: /app
+    command: >
+      sh -c "cd /app/website && npm run dev -- --hostname 0.0.0.0 --port 3000 &
+      cd /app/backoffice && npm run dev -- --hostname 0.0.0.0 --port 3001 &
+      wait"
+    volumes:
+      - ./uis:/app
+      - /app/website/node_modules
+      - /app/backoffice/node_modules
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8000
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    depends_on:
+      - backend
+    networks:
+      - trackflow_network
+
+  backend:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+    working_dir: /app/services/incidents-api
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./:/app
+    environment:
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8000:8000"
+    networks:
+      - trackflow_network
+
+networks:
+  trackflow_network:
+    name: trackflow_network
