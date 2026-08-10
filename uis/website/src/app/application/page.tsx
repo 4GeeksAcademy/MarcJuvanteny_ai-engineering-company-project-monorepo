@@ -1,6 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { QuoteForm } from "@/components/quote-form";
+import dynamic from "next/dynamic";
+
+const QuoteForm = dynamic(
+  () => import("@/components/quote-form").then((mod) => mod.QuoteForm),
+  {
+    loading: () => (
+      <p className="rounded-xl border border-sky/30 bg-navy/60 px-4 py-3 text-sm text-sky">
+        Cargando formulario...
+      </p>
+    ),
+  }
+);
 
 export const metadata: Metadata = {
   title: "TrackFlow - Calcula tu presupuesto",

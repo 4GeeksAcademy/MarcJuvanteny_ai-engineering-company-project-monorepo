@@ -1,5 +1,9 @@
 import Link from "next/link";
-import { LandingInteractions } from "@/components/landing-interactions";
+import dynamic from "next/dynamic";
+
+const LandingInteractions = dynamic(
+  () => import("@/components/landing-interactions").then((mod) => mod.LandingInteractions)
+);
 
 export default function Home() {
   return (
