@@ -48,22 +48,22 @@ export default function ApplicationPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
-        <section className="mb-8 sm:mb-10" aria-label="Cabecera del formulario">
+      <main className="mx-auto max-w-5xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
+        <section className="mb-10 sm:mb-14" aria-label="Cabecera del formulario">
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-orange">
             Formulario de aplicacion
           </p>
-          <h1 className="mt-3 font-display text-3xl leading-tight tracking-[-0.03em] sm:text-4xl lg:text-5xl">
+          <h1 className="mt-4 font-display text-4xl leading-[1.08] tracking-[-0.03em] sm:text-5xl lg:text-6xl">
             Calcula tu presupuesto ahora
           </h1>
-          <p className="mt-4 max-w-3xl leading-7 text-sky/90">
+          <p className="mt-5 max-w-2xl text-lg leading-8 text-sky/90">
             Completa esta encuesta y te enviaremos una propuesta personalizada.
             Campos marcados con * son obligatorios.
           </p>
         </section>
 
         <section
-          className="rounded-2xl border border-sky/20 bg-white/5 p-5 sm:p-8"
+          className="rounded-2xl border border-sky/20 bg-white/5 p-6 sm:p-9"
           aria-label="Formulario de presupuesto"
         >
           <QuoteForm />
