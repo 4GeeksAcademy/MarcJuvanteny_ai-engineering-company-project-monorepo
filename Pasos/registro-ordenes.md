@@ -21,3 +21,15 @@ Artefactos: uis/backoffice/src/components/incidents-management-panel.tsx, Pasos/
 5. Solicitud: Listar todos los endpoints FastAPI y evaluar coste, frecuencia de llamada y frecuencia de cambio de datos subyacentes.
 Estado: completada
 Artefacto: Pasos/analisis-endpoints-fastapi-coste-frecuencia.md
+
+6. Solicitud: Identificar al menos dos endpoints que cumplan criterios de coste + frecuencia + estabilidad para caching.
+Estado: completada
+Artefacto: Pasos/candidatos-caching-endpoints.md
+
+7. Solicitud: Implementar caching para endpoints candidatos usando cache en memoria con TTL e invalidacion.
+Estado: completada
+Artefactos: services/incidents-api/main.py, Pasos/implementacion-caching-endpoints.md
+
+8. Solicitud: Implementar invalidacion de cache cuando cambien los datos subyacentes (operaciones de escritura).
+Estado: completada
+Artefactos: services/incidents-api/main.py, Pasos/implementacion-caching-endpoints.md
