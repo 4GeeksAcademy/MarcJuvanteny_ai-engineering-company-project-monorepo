@@ -33,3 +33,7 @@ Artefactos: services/incidents-api/main.py, Pasos/implementacion-caching-endpoin
 8. Solicitud: Implementar invalidacion de cache cuando cambien los datos subyacentes (operaciones de escritura).
 Estado: completada
 Artefactos: services/incidents-api/main.py, Pasos/implementacion-caching-endpoints.md
+
+9. Solicitud: Crear informe tecnico con decisiones frontend/backend de cache, trade-offs y exclusiones.
+Estado: completada
+Artefactos: CACHING_REPORT.md
