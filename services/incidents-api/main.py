@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import RLock
+from time import monotonic
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile, status
@@ -18,7 +20,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from auth_service import authenticate_user, create_access_token, get_user_from_token, verify_password
+from auth_service import authenticate_user, create_access_token, decode_password_reset_token, get_user_from_token, verify_password
 from database import SQL_ENGINE, get_db, get_tinydb_path
 from incident_analysis import CSVInputError, read_csv_text, summarize_rows, summary_to_csv_text
 from models import (
@@ -74,6 +76,18 @@ LAST_ANALYSIS_SUMMARY: dict[str, Any] | None = None
 SUPABASE_SQL_ENGINE = SQL_ENGINE
 bearer_scheme = HTTPBearer(auto_error=False)
 
+# Short-lived in-memory caches for read-heavy endpoints.
+SUPPLIERS_CACHE_TTL_SECONDS = 45
+AUTH_ME_CACHE_TTL_SECONDS = 20
+
+SUPPLIERS_CACHE_LOCK = RLock()
+SUPPLIERS_CACHE: dict[str, tuple[float, list[SupplierRecord]]] = {}
+
+AUTH_ME_CACHE_LOCK = RLock()
+AUTH_ME_CACHE: dict[str, tuple[float, AuthMeResponse]] = {}
+AUTH_ME_TOKEN_TO_USER: dict[str, int] = {}
+AUTH_ME_USER_TO_TOKENS: dict[int, set[str]] = {}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -116,9 +130,58 @@ def get_suppliers_db_path() -> Path:
     return get_tinydb_path()
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-) -> UserWithProfileRecord:
+def _cache_get[T](cache: dict[str, tuple[float, T]], key: str) -> T | None:
+    entry = cache.get(key)
+    if entry is None:
+        return None
+
+    expires_at, value = entry
+    if expires_at <= monotonic():
+        cache.pop(key, None)
+        return None
+
+    return value
+
+
+def _cache_set[T](cache: dict[str, tuple[float, T]], key: str, value: T, ttl_seconds: int) -> None:
+    cache[key] = (monotonic() + ttl_seconds, value)
+
+
+def _invalidate_suppliers_cache() -> None:
+    with SUPPLIERS_CACHE_LOCK:
+        SUPPLIERS_CACHE.clear()
+
+
+def _invalidate_auth_me_token(token: str) -> None:
+    user_id = AUTH_ME_TOKEN_TO_USER.pop(token, None)
+    AUTH_ME_CACHE.pop(token, None)
+
+    if user_id is None:
+        return
+
+    tokens = AUTH_ME_USER_TO_TOKENS.get(user_id)
+    if tokens is None:
+        return
+
+    tokens.discard(token)
+    if not tokens:
+        AUTH_ME_USER_TO_TOKENS.pop(user_id, None)
+
+
+def _set_auth_me_cache(token: str, user_id: int, response: AuthMeResponse) -> None:
+    _cache_set(AUTH_ME_CACHE, token, response, AUTH_ME_CACHE_TTL_SECONDS)
+    AUTH_ME_TOKEN_TO_USER[token] = user_id
+    AUTH_ME_USER_TO_TOKENS.setdefault(user_id, set()).add(token)
+
+
+def _invalidate_auth_me_cache_for_user(user_id: int) -> None:
+    with AUTH_ME_CACHE_LOCK:
+        tokens = list(AUTH_ME_USER_TO_TOKENS.get(user_id, set()))
+        for token in tokens:
+            _invalidate_auth_me_token(token)
+
+
+def _require_bearer_token(credentials: HTTPAuthorizationCredentials | None) -> str:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -126,7 +189,14 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return get_user_from_token(get_suppliers_db_path(), credentials.credentials)
+    return credentials.credentials
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> UserWithProfileRecord:
+    token = _require_bearer_token(credentials)
+    return get_user_from_token(get_suppliers_db_path(), token)
 
 
 def ensure_self_or_admin(actor: UserWithProfileRecord, user_id: int) -> None:
@@ -186,6 +256,7 @@ async def create_supplier(
         doc_id = suppliers_table.insert(supplier_data)
         created_document = suppliers_table.get(doc_id=doc_id)
 
+    _invalidate_suppliers_cache()
     return supplier_document_to_record(created_document)
 
 
@@ -199,6 +270,12 @@ async def list_suppliers(
     _ = current_user, db
     validate_supplier_filters(country, category)
 
+    cache_key = f"country={country or '*'}|category={category or '*'}"
+    with SUPPLIERS_CACHE_LOCK:
+        cached_rows = _cache_get(SUPPLIERS_CACHE, cache_key)
+    if cached_rows is not None:
+        return cached_rows
+
     with TinyDB(get_suppliers_db_path()) as db:
         suppliers_table = db.table("suppliers")
         documents = suppliers_table.all()
@@ -211,7 +288,10 @@ async def list_suppliers(
             continue
         filtered_documents.append(document)
 
-    return [supplier_document_to_record(document) for document in filtered_documents]
+    rows = [supplier_document_to_record(document) for document in filtered_documents]
+    with SUPPLIERS_CACHE_LOCK:
+        _cache_set(SUPPLIERS_CACHE, cache_key, rows, SUPPLIERS_CACHE_TTL_SECONDS)
+    return rows
 
 
 @app.get("/suppliers/{supplier_id}", response_model=SupplierRecord)
@@ -245,6 +325,7 @@ async def update_supplier_rate(
         )
         updated_document = suppliers_table.get(doc_id=supplier_id)
 
+    _invalidate_suppliers_cache()
     return supplier_document_to_record(updated_document)
 
 
@@ -265,6 +346,7 @@ async def update_supplier_status(
         )
         updated_document = suppliers_table.get(doc_id=supplier_id)
 
+    _invalidate_suppliers_cache()
     return supplier_document_to_record(updated_document)
 
 
@@ -280,6 +362,7 @@ async def delete_supplier(
         suppliers_table = db.table("suppliers")
         suppliers_table.remove(doc_ids=[supplier_id])
 
+    _invalidate_suppliers_cache()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -471,7 +554,9 @@ async def update_user(
     if payload.is_active is not None and current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Only admins can update is_active.")
 
-    return update_user_service(get_suppliers_db_path(), user_id, payload)
+    updated_user = update_user_service(get_suppliers_db_path(), user_id, payload)
+    _invalidate_auth_me_cache_for_user(user_id)
+    return updated_user
 
 
 @app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -481,6 +566,7 @@ async def delete_user(
 ) -> Response:
     ensure_self_or_admin(current_user, user_id)
     delete_user_service(get_suppliers_db_path(), user_id)
+    _invalidate_auth_me_cache_for_user(user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -494,7 +580,9 @@ async def update_my_profile(
     payload: ProfileUpdate,
     current_user: UserWithProfileRecord = Depends(get_current_user),
 ) -> ProfileRecord:
-    return update_profile_by_user_id(get_suppliers_db_path(), current_user.id, payload)
+    updated_profile = update_profile_by_user_id(get_suppliers_db_path(), current_user.id, payload)
+    _invalidate_auth_me_cache_for_user(current_user.id)
+    return updated_profile
 
 
 @app.post("/auth/login", response_model=TokenResponse)
@@ -512,7 +600,18 @@ async def login(payload: LoginRequest) -> TokenResponse:
 
 
 @app.get("/auth/me", response_model=AuthMeResponse)
-async def auth_me(current_user: UserWithProfileRecord = Depends(get_current_user)) -> AuthMeResponse:
+async def auth_me(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> AuthMeResponse:
+    token = _require_bearer_token(credentials)
+
+    with AUTH_ME_CACHE_LOCK:
+        cached_response = _cache_get(AUTH_ME_CACHE, token)
+        if cached_response is not None:
+            return cached_response
+
+    current_user = get_user_from_token(get_suppliers_db_path(), token)
+
     profile_payload = None
     if current_user.profile is not None:
         profile_payload = AuthMeProfile(
@@ -521,11 +620,16 @@ async def auth_me(current_user: UserWithProfileRecord = Depends(get_current_user
             address=current_user.profile.address,
         )
 
-    return AuthMeResponse(
+    response_payload = AuthMeResponse(
         email=current_user.email,
         role=current_user.role,
         profile=profile_payload,
     )
+
+    with AUTH_ME_CACHE_LOCK:
+        _set_auth_me_cache(token, current_user.id, response_payload)
+
+    return response_payload
 
 
 @app.post("/auth/forgot-password", response_model=MessageResponse)
@@ -536,7 +640,13 @@ async def forgot_password(payload: ForgotPasswordRequest) -> MessageResponse:
 
 @app.post("/auth/reset-password", response_model=MessageResponse)
 async def reset_password(payload: ResetPasswordRequest) -> MessageResponse:
+    token_payload = decode_password_reset_token(payload.token)
     confirm_password_reset(get_suppliers_db_path(), payload.token, payload.new_password)
+
+    user_subject = token_payload.get("sub")
+    if user_subject is not None:
+        _invalidate_auth_me_cache_for_user(int(user_subject))
+
     return MessageResponse(message="Contrasena actualizada correctamente.")
 
 
@@ -549,6 +659,7 @@ async def change_password(
         raise HTTPException(status_code=400, detail="La contrasena actual es incorrecta.")
 
     update_user_service(get_suppliers_db_path(), current_user.id, UserCredentialsUpdate(password=payload.new_password))
+    _invalidate_auth_me_cache_for_user(current_user.id)
     return MessageResponse(message="Contrasena actualizada correctamente.")
 
 

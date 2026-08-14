@@ -123,10 +123,6 @@ function buildIncidentsQuery(status: string, origin: string, branch: string) {
   return queryString ? `?${queryString}` : "";
 }
 
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat("es-ES", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
-}
-
 type AuthFetch = (path: string, options?: RequestInit) => Promise<Response>;
 
 async function requestIncidents(authFetch: AuthFetch, status: string, origin: string, branch: string) {
@@ -224,6 +220,11 @@ export function IncidentsManagementPanel() {
 
   const totalVisible = incidents.length;
 
+  const dateTimeFormatter = useMemo(
+    () => new Intl.DateTimeFormat("es-ES", { dateStyle: "medium", timeStyle: "short" }),
+    []
+  );
+
   const summaryRows = useMemo(() => {
     if (!summary) return null;
     return {
@@ -233,6 +234,17 @@ export function IncidentsManagementPanel() {
       branch: branchOptions.map((branch) => ({ key: branch, label: branchLabels[branch], count: summary.by_branch?.[branch] ?? 0 })),
     };
   }, [summary]);
+
+  const incidentRows = useMemo(() => {
+    const updatingIdsSet = new Set(updatingIds);
+
+    return incidents.map((incident) => ({
+      incident,
+      isUpdating: updatingIdsSet.has(incident.id),
+      nextOptions: nextStatusOptions[incident.status] ?? [],
+      formattedUpdatedAt: dateTimeFormatter.format(new Date(incident.updated_at)),
+    }));
+  }, [incidents, updatingIds, dateTimeFormatter]);
 
   async function submitIncident(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -450,9 +462,7 @@ export function IncidentsManagementPanel() {
               </tr>
             </thead>
             <tbody>
-              {incidents.map((incident) => {
-                const isUpdating = updatingIds.includes(incident.id);
-                const nextOptions = nextStatusOptions[incident.status] ?? [];
+              {incidentRows.map(({ incident, isUpdating, nextOptions, formattedUpdatedAt }) => {
 
                 return (
                   <tr key={incident.id}>
@@ -468,7 +478,7 @@ export function IncidentsManagementPanel() {
                     <td>
                       <span className={statusBadgeClass[incident.status]}>{statusLabels[incident.status]}</span>
                     </td>
-                    <td>{formatDateTime(incident.updated_at)}</td>
+                    <td>{formattedUpdatedAt}</td>
                     <td>
                       {nextOptions.length ? (
                         <select
