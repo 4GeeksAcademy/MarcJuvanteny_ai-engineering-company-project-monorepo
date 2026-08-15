@@ -11,6 +11,9 @@ Fecha: 2026-08-15
 - Orden 6: "Para endpoints de escritura (POST, PUT PATCH): define un esquema de entrada separado que acepte únicamente los campos que deben poder escribirse. No reutilices el esquema de respuesta como esquema de entrada."
 - Orden 7: "Asegurate de que ningún endpoint exponga campos sensibles (por ejemplo, contraseñas, hasheadas, tokens internos, claves foráneas en bruto cuando hay un objeto anidado disponible)."
 - Orden 8: "Cuando una relación sea necesaria en la respuesta, decide explícitamente: devolver el objeto anidado completo, devolver solo el ID relacionado o devolver una proyección plana y documenta esa decisión en tu archivo de auditoría."
+- Orden 9: "Confirma que todos los endpoints siguen pasando los tests existentes tras los cambios de esquema."
+- Orden 10: "Prueba manualmente al menos tres endpoints usando la documentación interactiva de FastAPI (/docs) y verifica que el shape de la respuesta coincide con el esquema definido."
+- Orden 11: "Actualiza el documento de auditoría para marcar todos los endpoints con un tick, una vez completada la implementación."
 
 ## Criterio de clasificación
 - Esquema tipado: la función devuelve una instancia tipada (por ejemplo, modelos Pydantic/SQLModel no tabla) o una lista de estas, y/o está normalizada con response_model.

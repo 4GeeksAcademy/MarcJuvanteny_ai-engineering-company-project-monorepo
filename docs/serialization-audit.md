@@ -12,58 +12,60 @@ Scope: services/incidents-api (`main.py` + `routers/inventory.py`)
 ## Current Behavior Summary
 
 - Total business endpoints audited: 32
-- Endpoints with `response_model`: 29
-- Endpoints without `response_model`: 3
+- Endpoints with `response_model`: 32
+- Endpoints without `response_model`: 0
 - Raw ORM returns detected: 0
-- Untyped dict returns detected: 1 (`POST /api/incidents/analyze`)
-- Response without schema contract: 3 (`DELETE /suppliers/{supplier_id}`, `DELETE /users/{user_id}`, `GET /api/incidents/results/export`)
+- Untyped dict returns detected: 0
+- Response without schema contract: 0
+
+Implementation status: completed for all audited endpoints.
 
 ## Classification by Endpoint
 
-| Method | Route | Status | Notes |
-|---|---|---|---|
-| GET | /inventory/products | Already serialized | `list[SKUResponse]` with computed stock and stable shape. |
-| POST | /inventory/products | Already serialized | `SKUResponse` typed payload. |
-| GET | /inventory/products/{id} | Already serialized | `SKUResponse` for single item retrieval. |
-| POST | /inventory/orders/inbound | Already serialized | `StockEntryResponse` typed movement output. |
-| POST | /inventory/orders/outbound | Already serialized | `StockExitResponse` typed movement output. |
-| GET | /inventory/orders | Already serialized | `list[StockMovementResponse]` timeline output. |
-| POST | /suppliers | Already serialized | `SupplierRecord` mapped from TinyDB document. |
-| GET | /suppliers | Already serialized | `list[SupplierRecord]` typed list output. |
-| GET | /suppliers/{supplier_id} | Already serialized | `SupplierRecord` typed output. |
-| PATCH | /suppliers/{supplier_id}/rate | Already serialized | `SupplierRecord` typed updated output. |
-| PATCH | /suppliers/{supplier_id}/status | Already serialized | `SupplierRecord` typed updated output. |
-| DELETE | /suppliers/{supplier_id} | Not serialized | `204 Response` without `response_model`. |
-| POST | /api/incidents | Already serialized | `IncidentRecord` typed output. |
-| GET | /api/incidents | Already serialized | `list[IncidentRecord]` typed output. |
-| GET | /api/incidents/summary | Already serialized | `IncidentSummary` typed aggregated output. |
-| GET | /api/incidents/{incident_id} | Already serialized | `IncidentRecord` typed output. |
-| PATCH | /api/incidents/{incident_id}/status | Already serialized | `IncidentRecord` typed output after transition. |
-| POST | /users | Partially serialized | `UserWithProfileRecord` includes `hashed_password` (unnecessary sensitive field). |
-| GET | /users | Partially serialized | `list[UserWithProfileRecord]` exposes `hashed_password` per user. |
-| GET | /users/by-email | Partially serialized | `UserWithProfileRecord` exposes `hashed_password`. |
-| GET | /users/{user_id} | Partially serialized | `UserWithProfileRecord` exposes `hashed_password`. |
-| PUT | /users/{user_id} | Partially serialized | `UserWithProfileRecord` exposes `hashed_password` after update. |
-| DELETE | /users/{user_id} | Not serialized | `204 Response` without `response_model`. |
-| GET | /profiles/me | Already serialized | `ProfileRecord` typed output. |
-| PUT | /profiles/me | Already serialized | `ProfileRecord` typed updated output. |
-| POST | /auth/login | Already serialized | `TokenResponse` typed auth token output. |
-| GET | /auth/me | Already serialized | `AuthMeResponse` minimal profile for current user. |
-| POST | /auth/forgot-password | Already serialized | `MessageResponse` typed output. |
-| POST | /auth/reset-password | Already serialized | `MessageResponse` typed output. |
-| POST | /auth/change-password | Already serialized | `MessageResponse` typed output. |
-| POST | /api/incidents/analyze | Not serialized | Untyped `dict[str, Any]`, no `response_model`. |
-| GET | /api/incidents/results/export | Not serialized | CSV `Response` without output schema contract. |
+| Method | Route | `response_model` | Status | Implemented |
+|---|---|---|---|---|
+| GET | /inventory/products | `list[SKUResponse]` | Already serialized | ✅ |
+| POST | /inventory/products | `SKUResponse` | Already serialized | ✅ |
+| GET | /inventory/products/{id} | `SKUResponse` | Already serialized | ✅ |
+| POST | /inventory/orders/inbound | `StockEntryResponse` | Already serialized | ✅ |
+| POST | /inventory/orders/outbound | `StockExitResponse` | Already serialized | ✅ |
+| GET | /inventory/orders | `list[StockMovementResponse]` | Already serialized | ✅ |
+| POST | /suppliers | `SupplierRecord` | Already serialized | ✅ |
+| GET | /suppliers | `list[SupplierListItem]` | Already serialized | ✅ |
+| GET | /suppliers/{supplier_id} | `SupplierRecord` | Already serialized | ✅ |
+| PATCH | /suppliers/{supplier_id}/rate | `SupplierRecord` | Already serialized | ✅ |
+| PATCH | /suppliers/{supplier_id}/status | `SupplierRecord` | Already serialized | ✅ |
+| DELETE | /suppliers/{supplier_id} | `MessageResponse` | Already serialized | ✅ |
+| POST | /api/incidents | `IncidentRecord` | Already serialized | ✅ |
+| GET | /api/incidents | `list[IncidentListItem]` | Already serialized | ✅ |
+| GET | /api/incidents/summary | `IncidentSummary` | Already serialized | ✅ |
+| GET | /api/incidents/{incident_id} | `IncidentRecord` | Already serialized | ✅ |
+| PATCH | /api/incidents/{incident_id}/status | `IncidentRecord` | Already serialized | ✅ |
+| POST | /users | `UserPublicRecord` | Already serialized | ✅ |
+| GET | /users | `list[UserListItem]` | Already serialized | ✅ |
+| GET | /users/by-email | `UserPublicRecord` | Already serialized | ✅ |
+| GET | /users/{user_id} | `UserPublicRecord` | Already serialized | ✅ |
+| PUT | /users/{user_id} | `UserPublicRecord` | Already serialized | ✅ |
+| DELETE | /users/{user_id} | `MessageResponse` | Already serialized | ✅ |
+| GET | /profiles/me | `ProfilePublic` | Already serialized | ✅ |
+| PUT | /profiles/me | `ProfilePublic` | Already serialized | ✅ |
+| POST | /auth/login | `TokenResponse` | Already serialized | ✅ |
+| GET | /auth/me | `AuthMeResponse` | Already serialized | ✅ |
+| POST | /auth/forgot-password | `MessageResponse` | Already serialized | ✅ |
+| POST | /auth/reset-password | `MessageResponse` | Already serialized | ✅ |
+| POST | /auth/change-password | `MessageResponse` | Already serialized | ✅ |
+| POST | /api/incidents/analyze | `IncidentAnalysisResponse` | Already serialized | ✅ |
+| GET | /api/incidents/results/export | `IncidentAnalysisExportResponse` | Already serialized | ✅ |
 
 ## Status Totals
 
-- Already serialized: 24
-- Partially serialized: 5
-- Not serialized: 4
+- Already serialized: 32
+- Partially serialized: 0
+- Not serialized: 0
 
 ## Main Risk Found
 
-User endpoints currently expose `hashed_password` through `UserWithProfileRecord` inheritance. Even if hashed, it is a sensitive field and should not be part of public API response contracts.
+No critical serialization risk remains open in the audited endpoints.
 
 ## Relationship Serialization Decisions (Current Policy)
 
