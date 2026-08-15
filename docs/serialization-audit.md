@@ -64,3 +64,24 @@ Scope: services/incidents-api (`main.py` + `routers/inventory.py`)
 ## Main Risk Found
 
 User endpoints currently expose `hashed_password` through `UserWithProfileRecord` inheritance. Even if hashed, it is a sensitive field and should not be part of public API response contracts.
+
+## Relationship Serialization Decisions (Current Policy)
+
+This section is the current source of truth for relation-shape decisions in API responses.
+
+| Relationship | Endpoints | Decision | Response shape | Rationale |
+|---|---|---|---|---|
+| User -> Profile (detail) | `POST /users`, `GET /users/by-email`, `GET /users/{user_id}`, `PUT /users/{user_id}` | Return nested object | `profile: ProfilePublic` | Profile context is useful for clients, but internal identifiers are not. |
+| User -> Profile (list) | `GET /users` | Return flat projection | `profile_name` only | List views prioritize scanability and payload size over full nested profile data. |
+| Profile -> User | `GET /profiles/me`, `PUT /profiles/me` | Do not return raw foreign key | no `user_id` in response | Avoid exposing internal linkage when the identity is already implied by auth context. |
+| Stock movement -> SKU | `POST /inventory/orders/inbound`, `POST /inventory/orders/outbound`, `GET /inventory/orders` | Return nested summary object | `sku: SKUSummary` | Business consumers need SKU context; raw `sku_id` is not enough and is internal. |
+| Stock entry/exit -> Actor user | same inventory movement endpoints | Do not return internal actor identifier | no `user_uuid` in response | Prevents exposing operational/internal identifiers not required by API consumers. |
+| Supplier list/detail | `/suppliers` endpoints | No nested relation needed | scalar fields only | Current contract does not require relational expansion. |
+| Incident list/detail | `/api/incidents` endpoints | No nested relation needed | scalar/enums only | Branch/origin/category are already explicit domain values; no extra nested object required. |
+
+### Explicit Strategy Rules
+
+- Use nested objects only when they add direct client value and can be safely sanitized.
+- Use flat projections for list endpoints whenever full nested objects are unnecessary.
+- Avoid raw foreign keys in output when an equivalent nested summary is available.
+- Never expose sensitive fields (`hashed_password`, reset tokens, internal auth artifacts).

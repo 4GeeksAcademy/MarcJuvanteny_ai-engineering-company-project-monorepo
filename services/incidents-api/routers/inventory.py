@@ -14,6 +14,7 @@ from models import SKU, StockEntry, StockExit, UserWithProfileRecord
 from schemas import (
     SKUCreate,
     SKUResponse,
+    SKUSummary,
     StockEntryCreate,
     StockEntryResponse,
     StockExitCreate,
@@ -132,6 +133,15 @@ def _build_sku_response(session: Session, sku: SKU) -> SKUResponse:
     )
 
 
+def _build_sku_summary(sku: SKU) -> SKUSummary:
+    return SKUSummary(
+        id=sku.id,
+        sku=sku.sku,
+        name=sku.name,
+        warehouse=sku.warehouse,
+    )
+
+
 def _get_sku_or_404(session: Session, sku_id: int) -> SKU:
     sku = session.get(SKU, sku_id)
     if sku is None:
@@ -239,7 +249,14 @@ def create_inbound_order(
     db.add(entry)
     db.commit()
     db.refresh(entry)
-    return StockEntryResponse(**entry.model_dump())
+    return StockEntryResponse(
+        id=entry.id,
+        sku=_build_sku_summary(sku),
+        quantity=entry.quantity,
+        reference=entry.reference,
+        warehouse=entry.warehouse,
+        created_at=entry.created_at,
+    )
 
 
 @router.post("/orders/outbound", response_model=StockExitResponse, status_code=status.HTTP_201_CREATED)
@@ -263,7 +280,15 @@ def create_outbound_order(
     db.add(movement)
     db.commit()
     db.refresh(movement)
-    return StockExitResponse(**movement.model_dump())
+    return StockExitResponse(
+        id=movement.id,
+        sku=_build_sku_summary(sku),
+        quantity=movement.quantity,
+        exit_type=movement.exit_type,
+        tracking_number=movement.tracking_number,
+        warehouse=movement.warehouse,
+        created_at=movement.created_at,
+    )
 
 
 @router.get("/orders", response_model=list[StockMovementResponse])
@@ -283,13 +308,10 @@ def list_orders(db: Session = Depends(get_db)) -> list[StockMovementResponse]:
             StockMovementResponse(
                 movement_type="inbound",
                 id=row.id,
-                sku_id=row.sku_id,
-                sku=sku.sku,
-                sku_name=sku.name,
+                sku=_build_sku_summary(sku),
                 warehouse=row.warehouse,
                 quantity=row.quantity,
                 created_at=row.created_at,
-                user_uuid=row.user_uuid,
                 reference=row.reference,
             )
         )
@@ -302,13 +324,10 @@ def list_orders(db: Session = Depends(get_db)) -> list[StockMovementResponse]:
             StockMovementResponse(
                 movement_type="outbound",
                 id=row.id,
-                sku_id=row.sku_id,
-                sku=sku.sku,
-                sku_name=sku.name,
+                sku=_build_sku_summary(sku),
                 warehouse=row.warehouse,
                 quantity=row.quantity,
                 created_at=row.created_at,
-                user_uuid=row.user_uuid,
                 exit_type=row.exit_type,
                 tracking_number=row.tracking_number,
             )

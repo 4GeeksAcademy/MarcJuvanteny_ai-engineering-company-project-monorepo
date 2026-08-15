@@ -5,6 +5,12 @@ Fecha: 2026-08-15
 ## Órdenes del usuario (registro)
 - Orden 1: "Todas las ordenes qeu te voy a dar quiero que las apuntes en un documento nuevo en la carpeta Pasos. Para cada endpoint, documenta su comportamiento de respuesta actual: Usa response_model? Devuelve un objeto ORM en crudo, un dict o un equema tipado?"
 - Orden 2: "Clasifica cada endpoint en uno de estos tres estados: Ya serializado, Parcialmente serializado, Sin serializar."
+- Orden 3: "Crea o actuliza los esquemas Pydantic para cada endpoint clasificado como Sin serializar o Parcialmente serialziado."
+- Orden 4: "Asegurate de que cada endpoint tiene un response_model explícito declarado en su decorador de ruta."
+- Orden 5: "Para endpoints de listado: define un esquema que devuelva solo los campos que los consumidores neceistan. Evita devolver objetos anidados completos cuando una representacion clana es suficiente."
+- Orden 6: "Para endpoints de escritura (POST, PUT PATCH): define un esquema de entrada separado que acepte únicamente los campos que deben poder escribirse. No reutilices el esquema de respuesta como esquema de entrada."
+- Orden 7: "Asegurate de que ningún endpoint exponga campos sensibles (por ejemplo, contraseñas, hasheadas, tokens internos, claves foráneas en bruto cuando hay un objeto anidado disponible)."
+- Orden 8: "Cuando una relación sea necesaria en la respuesta, decide explícitamente: devolver el objeto anidado completo, devolver solo el ID relacionado o devolver una proyección plana y documenta esa decisión en tu archivo de auditoría."
 
 ## Criterio de clasificación
 - Esquema tipado: la función devuelve una instancia tipada (por ejemplo, modelos Pydantic/SQLModel no tabla) o una lista de estas, y/o está normalizada con response_model.
