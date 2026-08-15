@@ -1,0 +1,945 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trackflow.local/schemas/event-shcemas.json",
+  "title": "TrackFlow Telemetry Event Schemas",
+  "description": "Envelope and per-event allowlist validation for telemetry events.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "envelope",
+    "events"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "properties"
+      ],
+      "properties": {
+        "required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "const": [
+            "eventId",
+            "timestamp",
+            "sessionId",
+            "userId",
+            "event_type",
+            "schemaVersion",
+            "requestId",
+            "properties"
+          ]
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "eventId",
+            "timestamp",
+            "sessionId",
+            "userId",
+            "event_type",
+            "schemaVersion",
+            "requestId",
+            "properties"
+          ],
+          "properties": {
+            "eventId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "timestamp": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "userId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "event_type": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)+$"
+            },
+            "schemaVersion": {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "properties": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "events": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inbound_order_created",
+        "outbound_order_created",
+        "stock_threshold_triggered",
+        "direct_stock_edit_rejected",
+        "inventory_discrepancy_detected",
+        "auth_login_attempted",
+        "auth_login_succeeded",
+        "auth_login_failed",
+        "session_expired",
+        "protected_route_redirected",
+        "route_changed",
+        "page_load_completed",
+        "api_latency_recorded",
+        "api_request_failed",
+        "frontend_error_captured"
+      ],
+      "properties": {
+        "inbound_order_created": {
+          "$ref": "#/$defs/inbound_order_created"
+        },
+        "outbound_order_created": {
+          "$ref": "#/$defs/outbound_order_created"
+        },
+        "stock_threshold_triggered": {
+          "$ref": "#/$defs/stock_threshold_triggered"
+        },
+        "direct_stock_edit_rejected": {
+          "$ref": "#/$defs/direct_stock_edit_rejected"
+        },
+        "inventory_discrepancy_detected": {
+          "$ref": "#/$defs/inventory_discrepancy_detected"
+        },
+        "auth_login_attempted": {
+          "$ref": "#/$defs/auth_login_attempted"
+        },
+        "auth_login_succeeded": {
+          "$ref": "#/$defs/auth_login_succeeded"
+        },
+        "auth_login_failed": {
+          "$ref": "#/$defs/auth_login_failed"
+        },
+        "session_expired": {
+          "$ref": "#/$defs/session_expired"
+        },
+        "protected_route_redirected": {
+          "$ref": "#/$defs/protected_route_redirected"
+        },
+        "route_changed": {
+          "$ref": "#/$defs/route_changed"
+        },
+        "page_load_completed": {
+          "$ref": "#/$defs/page_load_completed"
+        },
+        "api_latency_recorded": {
+          "$ref": "#/$defs/api_latency_recorded"
+        },
+        "api_request_failed": {
+          "$ref": "#/$defs/api_request_failed"
+        },
+        "frontend_error_captured": {
+          "$ref": "#/$defs/frontend_error_captured"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "inventory_base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "warehouse",
+        "client_id",
+        "product_id",
+        "product_category",
+        "quantity"
+      ],
+      "properties": {
+        "warehouse": {
+          "type": "string",
+          "enum": [
+            "los_angeles",
+            "zaragoza"
+          ]
+        },
+        "client_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "product_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "product_category": {
+          "type": "string",
+          "enum": [
+            "fashion",
+            "electronics",
+            "cosmetics"
+          ]
+        },
+        "quantity": {
+          "type": "integer"
+        }
+      }
+    },
+    "inbound_order_created": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/inventory_base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "inbound_order_id"
+          ],
+          "properties": {
+            "inbound_order_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "reference": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "source_screen": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "source_action": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        }
+      ]
+    },
+    "outbound_order_created": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/inventory_base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "outbound_order_id",
+            "exit_type"
+          ],
+          "properties": {
+            "outbound_order_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "exit_type": {
+              "type": "string",
+              "enum": [
+                "dispatch",
+                "loss"
+              ]
+            },
+            "tracking_number": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "source_screen": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "source_action": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "exit_type": {
+                    "const": "dispatch"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "tracking_number"
+                ],
+                "properties": {
+                  "tracking_number": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "exit_type": {
+                    "const": "loss"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "tracking_number": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "stock_threshold_triggered": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/inventory_base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "threshold_min",
+            "current_stock",
+            "threshold_gap"
+          ],
+          "properties": {
+            "threshold_min": {
+              "type": "integer"
+            },
+            "current_stock": {
+              "type": "integer"
+            },
+            "threshold_gap": {
+              "type": "integer"
+            },
+            "threshold_rule_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "trigger_source": {
+              "type": "string",
+              "enum": [
+                "inbound",
+                "outbound",
+                "audit",
+                "recalc"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "direct_stock_edit_rejected": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/inventory_base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "attempted_field",
+            "attempted_value_type",
+            "attempted_value_length",
+            "rejection_reason"
+          ],
+          "properties": {
+            "attempted_field": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "attempted_value_type": {
+              "type": "string",
+              "enum": [
+                "string",
+                "number",
+                "boolean",
+                "null",
+                "object",
+                "array"
+              ]
+            },
+            "attempted_value_length": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "rejection_reason": {
+              "type": "string",
+              "enum": [
+                "direct_edit_forbidden",
+                "policy_violation",
+                "invalid_flow"
+              ]
+            },
+            "policy_rule_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "source_screen": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "source_action": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        }
+      ]
+    },
+    "inventory_discrepancy_detected": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/inventory_base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "expected_stock",
+            "counted_stock",
+            "discrepancy_quantity",
+            "discrepancy_direction",
+            "audit_id"
+          ],
+          "properties": {
+            "expected_stock": {
+              "type": "integer"
+            },
+            "counted_stock": {
+              "type": "integer"
+            },
+            "discrepancy_quantity": {
+              "type": "integer"
+            },
+            "discrepancy_direction": {
+              "type": "string",
+              "enum": [
+                "over",
+                "under"
+              ]
+            },
+            "audit_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "audit_type": {
+              "type": "string",
+              "enum": [
+                "cycle_count",
+                "full_count",
+                "investigation"
+              ]
+            },
+            "detected_by_role": {
+              "type": "string",
+              "enum": [
+                "admin",
+                "manager",
+                "user",
+                "auditor"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "auth_login_attempted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "auth_method",
+        "login_channel"
+      ],
+      "properties": {
+        "auth_method": {
+          "type": "string",
+          "enum": [
+            "password"
+          ]
+        },
+        "login_channel": {
+          "type": "string",
+          "enum": [
+            "web_backoffice"
+          ]
+        },
+        "source_screen": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "remember_session": {
+          "type": "boolean"
+        },
+        "attempt_number_in_session": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "auth_login_succeeded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "auth_method",
+        "login_channel",
+        "user_role",
+        "token_ttl_seconds"
+      ],
+      "properties": {
+        "auth_method": {
+          "type": "string",
+          "enum": [
+            "password"
+          ]
+        },
+        "login_channel": {
+          "type": "string",
+          "enum": [
+            "web_backoffice"
+          ]
+        },
+        "user_role": {
+          "type": "string",
+          "enum": [
+            "admin",
+            "manager",
+            "user"
+          ]
+        },
+        "token_ttl_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mfa_used": {
+          "type": "boolean"
+        },
+        "source_screen": {
+          "type": "string",
+          "maxLength": 64
+        }
+      }
+    },
+    "auth_login_failed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "auth_method",
+        "login_channel",
+        "failure_reason"
+      ],
+      "properties": {
+        "auth_method": {
+          "type": "string",
+          "enum": [
+            "password"
+          ]
+        },
+        "login_channel": {
+          "type": "string",
+          "enum": [
+            "web_backoffice"
+          ]
+        },
+        "failure_reason": {
+          "type": "string",
+          "enum": [
+            "invalid_credentials",
+            "locked_user",
+            "api_unavailable"
+          ]
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "source_screen": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "attempt_number_in_session": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "session_expired": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expired_by",
+        "last_route",
+        "reauth_required"
+      ],
+      "properties": {
+        "expired_by": {
+          "type": "string",
+          "enum": [
+            "ttl",
+            "revoked",
+            "invalid_token"
+          ]
+        },
+        "last_route": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "idle_time_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "token_age_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "reauth_required": {
+          "type": "boolean"
+        }
+      }
+    },
+    "protected_route_redirected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from_route",
+        "to_route",
+        "redirect_reason"
+      ],
+      "properties": {
+        "from_route": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "to_route": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "redirect_reason": {
+          "type": "string",
+          "enum": [
+            "unauthenticated",
+            "session_expired"
+          ]
+        },
+        "guard_name": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "had_token": {
+          "type": "boolean"
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        }
+      }
+    },
+    "route_changed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from_route",
+        "to_route",
+        "navigation_source",
+        "is_protected_route"
+      ],
+      "properties": {
+        "from_route": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "to_route": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "navigation_source": {
+          "type": "string",
+          "enum": [
+            "sidebar",
+            "deep_link",
+            "programmatic"
+          ]
+        },
+        "route_group": {
+          "type": "string",
+          "enum": [
+            "inventory",
+            "incidents",
+            "account",
+            "suppliers",
+            "summary"
+          ]
+        },
+        "is_protected_route": {
+          "type": "boolean"
+        },
+        "transition_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "page_load_completed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "route",
+        "load_time_ms"
+      ],
+      "properties": {
+        "route": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "route_group": {
+          "type": "string",
+          "enum": [
+            "inventory",
+            "incidents",
+            "account",
+            "suppliers",
+            "summary"
+          ]
+        },
+        "load_time_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "first_contentful_paint_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "api_calls_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "api_slowest_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "had_cached_data": {
+          "type": "boolean"
+        }
+      }
+    },
+    "api_latency_recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpoint",
+        "method",
+        "status_code",
+        "latency_ms",
+        "service"
+      ],
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ]
+        },
+        "status_code": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "latency_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "service": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "retry_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timed_out": {
+          "type": "boolean"
+        },
+        "response_size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "api_request_failed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpoint",
+        "method",
+        "failure_reason",
+        "service"
+      ],
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ]
+        },
+        "status_code": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "failure_reason": {
+          "type": "string",
+          "enum": [
+            "network_error",
+            "timeout",
+            "validation_error",
+            "server_error",
+            "unauthorized"
+          ]
+        },
+        "service": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "retry_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timed_out": {
+          "type": "boolean"
+        },
+        "network_error_type": {
+          "type": "string",
+          "enum": [
+            "dns",
+            "tls",
+            "refused",
+            "offline"
+          ]
+        }
+      }
+    },
+    "frontend_error_captured": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error_name",
+        "error_message_safe",
+        "stack_hash",
+        "route",
+        "severity",
+        "handled"
+      ],
+      "properties": {
+        "error_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "error_message_safe": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "stack_hash": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128
+        },
+        "component": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "route": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "handled": {
+          "type": "boolean"
+        },
+        "browser_family": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "browser_version_major": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}
