@@ -8,8 +8,10 @@ import {
   createInventoryApi,
   InventoryApiError,
   InventoryProduct,
+  LOW_STOCK_THRESHOLD,
   StockExitType,
 } from "@/lib/inventory";
+import { track } from "@/services/telemetry";
 
 type FormState = {
   sku_id: string;
@@ -109,13 +111,28 @@ export function InventoryOutboundOrderPanel() {
 
     setIsSubmitting(true);
 
+    const submittedQuantity = Number(formState.quantity);
+
     try {
-      await inventoryApi.createOutboundOrder({
+      const createdOrder = await inventoryApi.createOutboundOrder({
         sku_id: selectedProduct.id,
-        quantity: Number(formState.quantity),
+        quantity: submittedQuantity,
         exit_type: formState.exit_type,
         tracking_number: formState.exit_type === "dispatch" ? formState.tracking_number.trim() : null,
         warehouse: selectedProduct.warehouse,
+      });
+
+      track("outbound_order_created", {
+        warehouse: selectedProduct.warehouse,
+        client_id: selectedProduct.client_name,
+        product_id: selectedProduct.sku,
+        product_category: selectedProduct.category,
+        quantity: submittedQuantity,
+        outbound_order_id: String(createdOrder.id),
+        exit_type: createdOrder.exit_type,
+        tracking_number: createdOrder.tracking_number,
+        source_screen: "inventory.orders.outbound",
+        source_action: "submit_outbound_form",
       });
 
       setFormState((current) => ({
@@ -124,6 +141,25 @@ export function InventoryOutboundOrderPanel() {
         tracking_number: "",
       }));
       setSubmitSuccess(`Salida registrada correctamente para ${selectedProduct.name}.`);
+
+      try {
+        const refreshedProduct = await inventoryApi.getProduct(selectedProduct.id);
+        if (refreshedProduct.current_stock <= LOW_STOCK_THRESHOLD) {
+          track("stock_threshold_triggered", {
+            warehouse: refreshedProduct.warehouse,
+            client_id: refreshedProduct.client_name,
+            product_id: refreshedProduct.sku,
+            product_category: refreshedProduct.category,
+            quantity: submittedQuantity,
+            threshold_min: LOW_STOCK_THRESHOLD,
+            current_stock: refreshedProduct.current_stock,
+            threshold_gap: LOW_STOCK_THRESHOLD - refreshedProduct.current_stock,
+            trigger_source: "outbound",
+          });
+        }
+      } catch {
+        // Best-effort telemetry check only — does not affect the submitted order.
+      }
     } catch (error) {
       if (error instanceof InventoryApiError && error.status === 400) {
         setQuantityInlineError(error.message);

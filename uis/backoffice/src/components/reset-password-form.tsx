@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { extractErrorMessage } from "@/lib/api-errors";
 import { API_BASE_URL } from "@/lib/auth";
+import { timedFetch } from "@/services/telemetry";
 
 export function ResetPasswordForm() {
   const router = useRouter();
@@ -34,11 +35,16 @@ export function ResetPasswordForm() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/reset-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, new_password: newPassword }),
-      });
+      const response = await timedFetch(
+        "/auth/reset-password",
+        () =>
+          fetch(`${API_BASE_URL}/auth/reset-password`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token, new_password: newPassword }),
+          }),
+        { method: "POST", service: "incidents-api" }
+      );
 
       const data = await response.json().catch(() => null);
 

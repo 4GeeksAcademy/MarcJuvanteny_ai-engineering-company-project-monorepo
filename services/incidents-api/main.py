@@ -59,6 +59,7 @@ from models import (
 )
 from password_reset_service import confirm_password_reset, request_password_reset
 from routers.inventory import router as inventory_router, seed_inventory_if_empty
+from routers.telemetry import router as telemetry_router
 from user_service import (
     create_user as create_user_service,
     delete_user as delete_user_service,
@@ -98,9 +99,14 @@ app.add_middleware(
     ],
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    # navigator.sendBeacon() (used by the telemetry service to flush on tab
+    # hide/close) always sends the request with credentials on cross-origin
+    # calls, which requires the server to explicitly allow credentials.
+    allow_credentials=True,
 )
 
 app.include_router(inventory_router)
+app.include_router(telemetry_router)
 
 
 @app.on_event("startup")

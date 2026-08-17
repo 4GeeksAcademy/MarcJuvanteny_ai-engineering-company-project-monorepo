@@ -4,7 +4,8 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { useAuth } from "@/lib/auth-context";
-import { createInventoryApi, InventoryApiError, InventoryProduct } from "@/lib/inventory";
+import { createInventoryApi, InventoryApiError, InventoryProduct, LOW_STOCK_THRESHOLD } from "@/lib/inventory";
+import { track } from "@/services/telemetry";
 
 type FormState = {
   sku_id: string;
@@ -94,16 +95,49 @@ export function InventoryInboundOrderPanel() {
 
     setIsSubmitting(true);
 
+    const submittedQuantity = Number(formState.quantity);
+
     try {
-      await inventoryApi.createInboundOrder({
+      const createdOrder = await inventoryApi.createInboundOrder({
         sku_id: selectedProduct.id,
-        quantity: Number(formState.quantity),
+        quantity: submittedQuantity,
         reference: formState.reference.trim(),
         warehouse: selectedProduct.warehouse,
       });
 
+      track("inbound_order_created", {
+        warehouse: selectedProduct.warehouse,
+        client_id: selectedProduct.client_name,
+        product_id: selectedProduct.sku,
+        product_category: selectedProduct.category,
+        quantity: submittedQuantity,
+        inbound_order_id: String(createdOrder.id),
+        reference: createdOrder.reference,
+        source_screen: "inventory.orders.inbound",
+        source_action: "submit_inbound_form",
+      });
+
       setFormState((current) => ({ ...current, quantity: "", reference: "" }));
       setSubmitSuccess(`Entrada registrada correctamente para ${selectedProduct.name}.`);
+
+      try {
+        const refreshedProduct = await inventoryApi.getProduct(selectedProduct.id);
+        if (refreshedProduct.current_stock <= LOW_STOCK_THRESHOLD) {
+          track("stock_threshold_triggered", {
+            warehouse: refreshedProduct.warehouse,
+            client_id: refreshedProduct.client_name,
+            product_id: refreshedProduct.sku,
+            product_category: refreshedProduct.category,
+            quantity: submittedQuantity,
+            threshold_min: LOW_STOCK_THRESHOLD,
+            current_stock: refreshedProduct.current_stock,
+            threshold_gap: LOW_STOCK_THRESHOLD - refreshedProduct.current_stock,
+            trigger_source: "inbound",
+          });
+        }
+      } catch {
+        // Best-effort telemetry check only — does not affect the submitted order.
+      }
     } catch (error) {
       setSubmitError(getErrorMessage(error, "No se pudo crear la orden de entrada."));
     } finally {

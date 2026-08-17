@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { extractErrorMessage } from "@/lib/api-errors";
 import { API_BASE_URL } from "@/lib/auth";
+import { timedFetch } from "@/services/telemetry";
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
@@ -18,11 +19,16 @@ export function ForgotPasswordForm() {
     setErrorMessage(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
+      const response = await timedFetch(
+        "/auth/forgot-password",
+        () =>
+          fetch(`${API_BASE_URL}/auth/forgot-password`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email }),
+          }),
+        { method: "POST", service: "incidents-api" }
+      );
 
       const data = await response.json().catch(() => null);
 
