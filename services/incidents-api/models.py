@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, field_validator, model_validator
+from sqlalchemy import Column, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field as SQLField, SQLModel
 
 VALID_CATEGORIES = [
@@ -66,6 +68,29 @@ class StockExit(SQLModel, table=True):
     warehouse: str
     created_at: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
     user_uuid: str
+
+
+class TelemetryEventRecord(SQLModel, table=True):
+    """Immutable telemetry event log. One row per TelemetryEvent received on /telemetry/events.
+
+    No update/delete path exists for this table anywhere in the API — telemetry
+    events are append-only, matching event-shcemas.json's contract guarantee
+    that a recorded event is never mutated after ingestion.
+    """
+
+    __tablename__ = "telemetry_events"
+    __table_args__ = (
+        Index("ix_telemetry_events_properties_gin", "properties", postgresql_using="gin"),
+    )
+
+    event_id: str = SQLField(primary_key=True)
+    timestamp: datetime = SQLField(index=True)
+    session_id: str
+    user_id: str
+    event_type: str = SQLField(index=True)
+    schema_version: str
+    request_id: str
+    properties: dict[str, Any] = SQLField(sa_column=Column(JSONB, nullable=False))
 
 
 class SupplierStatus(StrEnum):
