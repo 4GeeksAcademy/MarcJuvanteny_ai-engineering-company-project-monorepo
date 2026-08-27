@@ -5,30 +5,33 @@ import Link from "next/link";
 
 import { extractErrorMessage } from "@/lib/api-errors";
 import { API_BASE_URL } from "@/lib/auth";
+import { useApiSubmit } from "@/lib/use-api-submit";
 import { timedFetch } from "@/services/telemetry";
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { isSubmitting, errorMessage, setErrorMessage, submit } = useApiSubmit();
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsSubmitting(true);
-    setErrorMessage(null);
 
-    try {
-      const response = await timedFetch(
-        "/auth/forgot-password",
-        () =>
-          fetch(`${API_BASE_URL}/auth/forgot-password`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email }),
-          }),
-        { method: "POST", service: "incidents-api" }
-      );
+    await submit(async () => {
+      let response: Response;
+      try {
+        response = await timedFetch(
+          "/auth/forgot-password",
+          () =>
+            fetch(`${API_BASE_URL}/auth/forgot-password`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email }),
+            }),
+          { method: "POST", service: "incidents-api" }
+        );
+      } catch {
+        throw new Error("No se pudo conectar con la API.");
+      }
 
       const data = await response.json().catch(() => null);
 
@@ -38,11 +41,7 @@ export function ForgotPasswordForm() {
       }
 
       setIsSubmitted(true);
-    } catch {
-      setErrorMessage("No se pudo conectar con la API.");
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
   }
 
   return (

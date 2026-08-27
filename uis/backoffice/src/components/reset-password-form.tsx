@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { extractErrorMessage } from "@/lib/api-errors";
 import { API_BASE_URL } from "@/lib/auth";
+import { useApiSubmit } from "@/lib/use-api-submit";
 import { timedFetch } from "@/services/telemetry";
 
 export function ResetPasswordForm() {
@@ -15,12 +16,10 @@ export function ResetPasswordForm() {
 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { isSubmitting, errorMessage, setErrorMessage, submit } = useApiSubmit();
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setErrorMessage(null);
 
     if (newPassword !== confirmPassword) {
       setErrorMessage("Las contrasenas no coinciden.");
@@ -32,19 +31,22 @@ export function ResetPasswordForm() {
       return;
     }
 
-    setIsSubmitting(true);
-
-    try {
-      const response = await timedFetch(
-        "/auth/reset-password",
-        () =>
-          fetch(`${API_BASE_URL}/auth/reset-password`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token, new_password: newPassword }),
-          }),
-        { method: "POST", service: "incidents-api" }
-      );
+    await submit(async () => {
+      let response: Response;
+      try {
+        response = await timedFetch(
+          "/auth/reset-password",
+          () =>
+            fetch(`${API_BASE_URL}/auth/reset-password`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token, new_password: newPassword }),
+            }),
+          { method: "POST", service: "incidents-api" }
+        );
+      } catch {
+        throw new Error("No se pudo conectar con la API.");
+      }
 
       const data = await response.json().catch(() => null);
 
@@ -54,11 +56,7 @@ export function ResetPasswordForm() {
       }
 
       router.replace("/login?resetSuccess=1");
-    } catch {
-      setErrorMessage("No se pudo conectar con la API.");
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
   }
 
   if (!token) {
