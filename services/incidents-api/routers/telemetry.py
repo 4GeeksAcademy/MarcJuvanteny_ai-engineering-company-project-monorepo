@@ -3,16 +3,26 @@ from __future__ import annotations
 import logging
 import os
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import insert
 from sqlmodel import Session
 
-from database import get_db
+from database import SQL_ENGINE, get_db
 from models import TelemetryEventRecord
+from telemetry.analysis import (
+    compute_availability,
+    compute_error_rate,
+    compute_event_volume,
+    compute_latency_percentiles,
+    load_events,
+)
+
+# Ventana por defecto del reporte cuando no se especifican start_date/end_date.
+DEFAULT_REPORT_WINDOW = timedelta(days=7)
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 logger = logging.getLogger("telemetry")
@@ -101,3 +111,32 @@ async def ingest_telemetry_events(
         stored=len(valid_events),
         rejected=rejected_count,
     )
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+@router.get("/report")
+async def get_telemetry_report(
+    start_date: datetime | None = Query(default=None, description="ISO 8601. Por defecto: end_date - 7 dias."),
+    end_date: datetime | None = Query(default=None, description="ISO 8601. Por defecto: ahora (UTC)."),
+) -> dict[str, Any]:
+    # El periodo se resuelve una unica vez aqui y se pasa igual a cada
+    # funcion de metrica — ninguna aplica su propia ventana por defecto.
+    resolved_end = _as_utc(end_date) if end_date is not None else datetime.now(timezone.utc)
+    resolved_start = _as_utc(start_date) if start_date is not None else resolved_end - DEFAULT_REPORT_WINDOW
+
+    events = load_events(SQL_ENGINE, resolved_start, resolved_end)
+
+    return {
+        "period": {"from": resolved_start.isoformat(), "to": resolved_end.isoformat()},
+        "metrics": {
+            "volume": compute_event_volume(events, resolved_start, resolved_end),
+            "errors": compute_error_rate(events, resolved_start, resolved_end),
+            "latency": compute_latency_percentiles(events, resolved_start, resolved_end),
+            "availability": compute_availability(events, resolved_start, resolved_end),
+        },
+    }
