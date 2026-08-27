@@ -2,7 +2,7 @@
 
 Fecha inicio: 2026-08-27
 Alcance: `uis/website` (web corporativa) y `uis/backoffice` (backoffice)
-Documentos relacionados: [`AUDIT.md`](../AUDIT.md), [`audit/before/`](../audit/before/README.md), [`audit/after/`](../audit/after/README.md)
+Documentos relacionados: [`AUDIT.md`](../AUDIT.md), [`REPORT.md`](../REPORT.md), [`audit/before/`](../audit/before/README.md), [`audit/after/`](../audit/after/README.md)
 
 ---
 
@@ -11,10 +11,12 @@ Documentos relacionados: [`AUDIT.md`](../AUDIT.md), [`audit/before/`](../audit/b
 | Bloque | Estado |
 |---|---|
 | Medición inicial (Lighthouse before) | ⛔ Bloqueado — sin Chrome en el Codespace |
-| Análisis del código → `AUDIT.md` | ✅ Hecho (2 casos documentados) |
+| Análisis del código → `AUDIT.md` | ✅ Hecho (puntuaciones pendientes + 6 problemas con causa raíz + 2 casos de refactor) |
 | Instalación de skills de agente | ⏳ Pendiente (opcional, decisión CTO) |
-| Correcciones | 🟡 Parcial — 1 refactor aplicado; KPI Lighthouse pendientes de medición |
+| Correcciones | 🟡 Parcial — 1 refactor aplicado (C1); KPI (C2-C7) pendientes de medición |
+| `REPORT.md` (correcciones + comparativa + impacto) | ✅ Estructura creada; tablas y valoración pendientes de mediciones |
 | Medición final (Lighthouse after) | ⛔ Bloqueado — depende de la medición inicial |
+| Commit de `AUDIT.md` + `REPORT.md` + capturas | ⏳ Pendiente (falta `npm install` + lint/build y las capturas) |
 
 ---
 
