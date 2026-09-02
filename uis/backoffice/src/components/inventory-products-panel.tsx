@@ -4,11 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/lib/auth-context";
-import { createInventoryApi, InventoryApiError, InventoryProduct } from "@/lib/inventory";
-
-// Thresholds defined for UX signals in this table:
-// low stock: <= 10 units, healthy stock: > 10 units.
-const LOW_STOCK_THRESHOLD = 10;
+import { createInventoryApi, InventoryApiError, InventoryProduct, LOW_STOCK_THRESHOLD } from "@/lib/inventory";
 
 function getStockBadgeClass(currentStock: number): string {
   return currentStock <= LOW_STOCK_THRESHOLD ? "status-badge status-badge-low-stock" : "status-badge status-badge-healthy-stock";

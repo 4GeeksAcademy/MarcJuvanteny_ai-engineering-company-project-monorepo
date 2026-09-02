@@ -38,6 +38,22 @@ services:
     networks:
       - trackflow_network
 
+  reporting:
+    build:
+      context: .
+      dockerfile: services/reporting/Dockerfile
+    working_dir: /app/services/reporting
+    command: uvicorn main:app --host 0.0.0.0 --port 8010 --reload
+    volumes:
+      - ./data/pipelines/exec_weekly_inventory_kpis:/app/data/pipelines/exec_weekly_inventory_kpis
+      - ./services/reporting:/app/services/reporting
+    environment:
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8010:8010"
+    networks:
+      - trackflow_network
+
 networks:
   trackflow_network:
     name: trackflow_network

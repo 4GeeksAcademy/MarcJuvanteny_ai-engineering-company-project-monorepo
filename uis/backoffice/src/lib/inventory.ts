@@ -1,5 +1,9 @@
 import { extractErrorMessage } from "@/lib/api-errors";
 
+// Thresholds defined for UX signals in the products table and for the
+// stock_threshold_triggered telemetry event: low stock: <= 10 units.
+export const LOW_STOCK_THRESHOLD = 10;
+
 export type InventoryWarehouse = "LA" | "ZGZ";
 export type InventoryCategory = "fashion" | "electronics" | "cosmetics";
 export type StockExitType = "dispatch" | "loss";

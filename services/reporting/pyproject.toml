@@ -1,0 +1,27 @@
+[project]
+name = "reporting-service"
+version = "0.1.0"
+description = "TrackFlow reporting API: consulta y disparo del pipeline exec_weekly_inventory_kpis"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0,<1.0.0",
+    "uvicorn[standard]>=0.30.0,<1.0.0",
+    "pydantic>=2.9.0,<3.0.0",
+    "python-dotenv>=1.0.1,<2.0.0",
+    "PyJWT>=2.9.0,<3.0.0",
+    # Mismas deps que data/pipelines: este servicio importa
+    # exec_weekly_inventory_kpis directamente (via sys.path, ver main.py),
+    # no como paquete instalado, asi que necesita su propio entorno completo.
+    "prefect>=3,<4",
+    "pandas>=2.2.0,<3.0.0",
+    "sqlalchemy>=2.0.0,<3.0.0",
+    "psycopg2-binary>=2.9.12",
+]
+
+[tool.setuptools]
+py-modules = ["main", "auth", "schemas", "pipeline_path"]
+packages = ["routers"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"

@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { extractErrorMessage, extractFieldErrors, FieldErrors } from "@/lib/api-errors";
 import { API_BASE_URL } from "@/lib/auth";
 import { useAuth } from "@/lib/auth-context";
+import { timedFetch } from "@/services/telemetry";
 
 type RegisterFormState = {
   email: string;
@@ -53,17 +54,22 @@ export function RegisterForm() {
     try {
       let response: Response;
       try {
-        response = await fetch(`${API_BASE_URL}/users`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: formState.email,
-            password: formState.password,
-            name: formState.name || undefined,
-            phone: formState.phone || undefined,
-            address: formState.address || undefined,
-          }),
-        });
+        response = await timedFetch(
+          "/users",
+          () =>
+            fetch(`${API_BASE_URL}/users`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                email: formState.email,
+                password: formState.password,
+                name: formState.name || undefined,
+                phone: formState.phone || undefined,
+                address: formState.address || undefined,
+              }),
+            }),
+          { method: "POST", service: "incidents-api" }
+        );
       } catch {
         throw new Error("No se pudo conectar con el servidor. Verifica tu conexion e intentalo de nuevo.");
       }
@@ -81,7 +87,7 @@ export function RegisterForm() {
         return;
       }
 
-      await login(formState.email, formState.password);
+      await login(formState.email, formState.password, "register");
       router.replace("/");
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "No se pudo conectar con la API.");
