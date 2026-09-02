@@ -1,0 +1,25 @@
+[project]
+name = "data-pipelines"
+version = "0.1.0"
+description = "Data pipelines del monorepo TrackFlow (ETL/ELT hacia el esquema reporting)"
+requires-python = ">=3.12"
+dependencies = [
+    "prefect>=3,<4",
+    "pandas>=2.2.0,<3.0.0",
+    "sqlalchemy>=2.0.0,<3.0.0",
+    "psycopg2-binary>=2.9.12",
+    "python-dotenv>=1.0.1,<2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0,<9.0.0",
+]
+
+[tool.setuptools]
+py-modules = ["pipeline"]
+packages = ["exec_weekly_inventory_kpis"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
