@@ -133,9 +133,9 @@ imports absolutos (`import runner as job_runner`).
   `export_telemetry_csv()` + `run_pipeline_subprocess()` atrapa
   `BaseException` (no solo `Exception` — a propósito, ver el punto
   siguiente), llama a `job_runner.mark_failed(engine, run_id, str(exc))` y
-  después hace `print(...)` (lo que cron redirige al log, ver
-  `infra/nightly_export.cron`) seguido de `raise` — el proceso termina con
-  `exit != 0` y la traceback completa queda en ese mismo log.
+  registra un `ERROR` (`_log_error`, ver "Observabilidad" más abajo) antes de
+  `raise` — el proceso termina con `exit != 0` y la traceback completa queda
+  en el mismo log (cron redirige stdout+stderr, ver `infra/nightly_export.cron`).
 - [x] **Ningún registro puede quedar en `processing` tras una ejecución
   fallida**: por eso el `except` de arriba captura `BaseException`, no
   `Exception` — un `KeyboardInterrupt`/`SystemExit` (Ctrl+C, o un `SIGTERM`
@@ -146,6 +146,67 @@ imports absolutos (`import runner as job_runner`).
   corrida futura). Verificado explícitamente en
   `scripts/tests/test_nightly_export.py::test_keyboard_interrupt_also_marks_failed_not_left_processing`.
 
+## Checklist de la entrega — Disparador
+
+- [x] **Cronjob del SO (`crontab`) o un contenedor scheduler dedicado —
+  recomendado en producción**: `infra/nightly_export.cron` (`0 2 * * *`, ver
+  ese archivo para la justificación del horario). No se instaló en ningún
+  crontab real del sistema desde este entorno (no hay host fijo donde
+  hacerlo) — queda como pendiente #1 más abajo.
+- [x] **No ejecutar el script dentro del proceso FastAPI** (sin
+  `APScheduler`, `@repeat_every` ni hooks `lifespan` en el servidor API):
+  verificado que ni `services/incidents-api/main.py` ni
+  `services/reporting/main.py` importan `nightly_export` ni usan ninguno de
+  esos mecanismos (`grep -rn "APScheduler\|repeat_every\|lifespan" services/`
+  solo encuentra menciones de `nightly_export` dentro de
+  `services/job_runner/`, nada en los `main.py`). Documentado explícitamente
+  en el docstring de `scripts/nightly_export.py` (sección "Disparador") junto
+  con la razón: correrlo en el hilo que sirve requests HTTP arriesgaría
+  bloquearlo durante los minutos que tarda el subproceso del pipeline, y
+  acoplaría el ciclo de vida de un job nocturno al de un servidor que debe
+  seguir respondiendo.
+- [x] **Expresión cron + decisión de implementación documentadas**: no hay un
+  PR real abierto en este flujo, así que el "cuerpo del PR" de la guía es
+  este mismo documento — ver `infra/nightly_export.cron` (expresión +
+  justificación del horario) y la sección "Decisiones de implementación" más
+  abajo (por qué `crontab` y no un scheduler en proceso).
+- [x] **`TARGET_DATE` opcional (`YYYY-MM-DD`) para sobrescribir la fecha en
+  pruebas sin tocar código**: `resolve_target_date()` — ya implementado
+  desde la primera entrega de este script, reutilizado tal cual por los
+  tests (`scripts/tests/test_nightly_export.py` fija `TARGET_DATE` vía
+  `monkeypatch.setenv` en cada test) y por el smoke test manual.
+
+## Checklist de la entrega — Observabilidad
+
+- [x] **Logs de ejecución con nivel `INFO` para eventos normales (inicio,
+  fin, omisión por duplicado) y `ERROR` para excepciones**: se reemplazaron
+  los `print()` de la entrega anterior por el módulo `logging`
+  (`scripts/nightly_export.py`, logger `"nightly_export"`) — `_log_info()`
+  para `started`/`csv_exists`/`csv_exported`/`pipeline_launch`/`pipeline_output`/
+  `skipped_lock`/`skipped_duplicate`/`completed`, `_log_error()` solo para
+  `failed`. El logger fija `propagate = False` (para no duplicarse si algo
+  más adelante importa este script dentro de un proceso con su propio root
+  logger configurado) y cron sigue capturando la salida igual, porque el
+  `StreamHandler` escribe a `sys.stdout` y `infra/nightly_export.cron`
+  redirige stdout+stderr al mismo archivo.
+- [x] **Cada línea incluye timestamp, nombre del job y estado resultante**:
+  formato `"%(asctime)s %(levelname)s job=%(job)s status=%(status)s - %(message)s"`
+  — `job` y `status` van como **campos estructurados** (via `extra={...}` en
+  cada llamada, no como texto libre embebido en el mensaje), así que se
+  puede grepear `status=failed` o `job=nightly_export` directo sobre el log
+  sin parsear frases. Ejemplo real (smoke test):
+  ```
+  2026-09-04 18:51:30,339 INFO job=nightly_export status=started - Job iniciado para target_date=2026-09-02.
+  2026-09-04 18:51:38,431 ERROR job=nightly_export status=failed - pipeline.py fallo (exit 1): ...
+  ```
+  Verificado en `scripts/tests/test_nightly_export.py` con un
+  `logging.Handler` propio colgado del logger `"nightly_export"` (no el
+  fixture `caplog` de pytest, que cuelga de root y por eso no ve nada con
+  `propagate = False` — ver el comentario en `_RecordCollector`):
+  `test_started_and_completed_are_logged_at_info_with_job_and_status`,
+  y las aserciones de nivel/status agregadas a los tests de lock, duplicado
+  y fallo.
+
 ## Cómo se verificó
 
 Igual que el resto de esta serie: Supabase sigue pausado, así que no hay
@@ -154,17 +215,19 @@ prueba contra el proyecto real.
 - `services/job_runner/tests/test_runner.py` (5 tests, `pytest`) contra
   SQLite en memoria: lock, idempotencia por fecha, `mark_completed`/`mark_failed`,
   y que jobs con distinto `job_name` no comparten el lock.
-- `scripts/tests/test_nightly_export.py` (5 tests, `pytest`, agregado junto
-  con el checklist de "Control de estado" de arriba): la máquina de estados
-  de `main()` contra SQLite, con `export_telemetry_csv`/`run_pipeline_subprocess`
-  monkeypatcheados (el I/O real de archivo + subproceso real se ejercita en
-  el smoke test manual de abajo, no aquí, para que este `pytest` sea rápido
-  y determinista) —
-  lock (no toca la fila `processing` existente), idempotencia por
-  `target_date` (no reexporta ni relanza), fallo normal (`RuntimeError` →
-  `failed`, nunca `processing`), **`KeyboardInterrupt` → también `failed`**
-  (la razón concreta de capturar `BaseException` y no solo `Exception`), y
-  éxito → `completed`.
+- `scripts/tests/test_nightly_export.py` (6 tests, `pytest`, agregado junto
+  con los checklists de "Control de estado" y "Observabilidad" de arriba): la
+  máquina de estados de `main()` contra SQLite, con
+  `export_telemetry_csv`/`run_pipeline_subprocess` monkeypatcheados (el I/O
+  real de archivo + subproceso real se ejercita en el smoke test manual de
+  abajo, no aquí, para que este `pytest` sea rápido y determinista) —
+  lock (no toca la fila `processing` existente, y loguea `INFO`/`skipped_lock`),
+  idempotencia por `target_date` (no reexporta ni relanza, `INFO`/`skipped_duplicate`),
+  fallo normal (`RuntimeError` → `failed`, nunca `processing`, `ERROR`/`failed`),
+  **`KeyboardInterrupt` → también `failed`** (la razón concreta de capturar
+  `BaseException` y no solo `Exception`), éxito → `completed`, y un test
+  dedicado a que `started`/`completed` salgan a `INFO` con `job`/`status`
+  como campos del `LogRecord`.
 - `scripts/nightly_export.py` **de punta a punta** (export real de CSV +
   subproceso **real** de `data/pipelines/pipeline.py`, no monkeypatcheado) se
   verificó aparte con un script manual de smoke-test (no comiteado — mismo

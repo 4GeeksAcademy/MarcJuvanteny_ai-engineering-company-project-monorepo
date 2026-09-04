@@ -5,12 +5,15 @@ de archivo + subproceso real ya se ejercitan en un smoke test manual, no
 comiteado, contra `data/pipelines/pipeline.py` de verdad -- ver
 `Pasos/telemetria-nightly-export-job-runner.md`); estos tests se concentran
 en la maquina de estados de `main()` sobre `job_runs`: lock, idempotencia por
-`target_date`, y la invariante "ningun registro queda en 'processing' tras
-una ejecucion fallida" (incluyendo un `KeyboardInterrupt`, no solo `Exception`).
+`target_date`, la invariante "ningun registro queda en 'processing' tras una
+ejecucion fallida" (incluyendo un `KeyboardInterrupt`, no solo `Exception`), y
+que cada evento se loguea al nivel correcto (INFO/ERROR) con `job`/`status`
+como campos estructurados.
 """
 
 from __future__ import annotations
 
+import logging
 import sys
 from datetime import date
 from pathlib import Path
@@ -27,6 +30,35 @@ import runner as job_runner  # noqa: E402
 
 JOB_NAME = "nightly_export"
 TARGET_DATE = date(2026, 9, 3)
+
+
+class _RecordCollector(logging.Handler):
+    """Handler minimo para inspeccionar los LogRecord emitidos.
+
+    No se usa el fixture `caplog` de pytest porque el logger de
+    nightly_export.py fija `propagate = False` a proposito (para no
+    duplicarse en el root logger de quien lo importe) -- eso tambien le
+    esconde los records al handler que `caplog` cuelga del root logger. Este
+    handler se cuelga directo del logger "nightly_export".
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def log_records():
+    collector = _RecordCollector()
+    logger = logging.getLogger("nightly_export")
+    logger.addHandler(collector)
+    try:
+        yield collector.records
+    finally:
+        logger.removeHandler(collector)
 
 
 @pytest.fixture
@@ -76,7 +108,7 @@ def _latest(engine):
     return job_runner.get_latest_job_run(engine, JOB_NAME, schema="")
 
 
-def test_lock_cancels_without_touching_the_processing_row(engine, monkeypatch):
+def test_lock_cancels_without_touching_the_processing_row(engine, monkeypatch, log_records):
     existing_run_id = job_runner.start_job_run(engine, JOB_NAME, TARGET_DATE, schema="")
 
     nightly_export.main()
@@ -85,8 +117,13 @@ def test_lock_cancels_without_touching_the_processing_row(engine, monkeypatch):
     assert latest["id"] == existing_run_id
     assert latest["status"] == "processing"  # main() no la toco
 
+    # Omision por lock: evento normal, no un error -> INFO, no ERROR.
+    skip_records = [r for r in log_records if r.status == "skipped_lock"]
+    assert skip_records and all(r.levelno == logging.INFO for r in skip_records)
+    assert all(r.job == JOB_NAME for r in skip_records)
 
-def test_completed_for_date_skips_export_and_pipeline(engine, monkeypatch):
+
+def test_completed_for_date_skips_export_and_pipeline(engine, monkeypatch, log_records):
     run_id = job_runner.start_job_run(engine, JOB_NAME, TARGET_DATE, schema="")
     job_runner.mark_completed(engine, run_id, schema="")
 
@@ -98,8 +135,13 @@ def test_completed_for_date_skips_export_and_pipeline(engine, monkeypatch):
 
     assert called == {"export": False, "pipeline": False}
 
+    # Omision por duplicado: uno de los eventos "normales" que la guia pide
+    # explicitamente a nivel INFO.
+    skip_records = [r for r in log_records if r.status == "skipped_duplicate"]
+    assert skip_records and all(r.levelno == logging.INFO for r in skip_records)
 
-def test_pipeline_failure_marks_failed_not_left_processing(engine, monkeypatch):
+
+def test_pipeline_failure_marks_failed_not_left_processing(engine, monkeypatch, log_records):
     monkeypatch.setattr(nightly_export, "export_telemetry_csv", lambda td: None)
 
     def _boom(td):
@@ -113,6 +155,26 @@ def test_pipeline_failure_marks_failed_not_left_processing(engine, monkeypatch):
     latest = _latest(engine)
     assert latest["status"] == "failed"  # nunca queda "processing"
     assert "boom" in latest["error_message"]
+
+    # Excepciones -> ERROR, no INFO.
+    error_records = [r for r in log_records if r.status == "failed"]
+    assert error_records and all(r.levelno == logging.ERROR for r in error_records)
+    assert "boom" in error_records[0].getMessage()
+
+
+def test_started_and_completed_are_logged_at_info_with_job_and_status(engine, monkeypatch, log_records):
+    monkeypatch.setattr(nightly_export, "export_telemetry_csv", lambda td: None)
+    monkeypatch.setattr(nightly_export, "run_pipeline_subprocess", lambda td: None)
+
+    nightly_export.main()
+
+    by_status = {r.status: r for r in log_records}
+    assert set(["started", "completed"]).issubset(by_status)
+    for status in ("started", "completed"):
+        record = by_status[status]
+        assert record.levelno == logging.INFO
+        assert record.job == JOB_NAME
+        assert record.created  # todo LogRecord trae timestamp (epoch); el formato %(asctime)s lo renderiza al escribir
 
 
 def test_keyboard_interrupt_also_marks_failed_not_left_processing(engine, monkeypatch):

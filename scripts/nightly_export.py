@@ -28,14 +28,29 @@ para la expresion exacta y por que se eligio ese horario). Cada corrida:
 si, Hito 6) -- ver la nota de arquitectura en
 `Pasos/telemetria-nightly-export-job-runner.md`.
 
+**Disparador**: este script se dispara por **cron del SO**
+(`infra/nightly_export.cron`), nunca desde dentro del proceso de una API.
+Deliberadamente no hay `APScheduler`, `@repeat_every` ni un hook `lifespan`
+en `services/incidents-api/main.py` o `services/reporting/main.py` que lo
+invoquen: correrlo en el mismo proceso/hilo que sirve requests HTTP
+arriesgaria bloquear ese hilo durante el subproceso del pipeline (potencialmente
+minutos) y acoplaria el ciclo de vida de un job nocturno al de un servidor
+que debe seguir respondiendo. Si en el futuro se reemplaza cron por un
+contenedor scheduler dedicado (systemd timer, un cronjob de k8s, Prefect
+deployment, etc.), sigue siendo un **worker separado** que invoca este mismo
+`main()` -- nunca el proceso de la API.
+
 Ejecucion: `python scripts/nightly_export.py`, con las dependencias de
 `services/job_runner/requirements.txt` instaladas en el interprete que lo
-corre (sqlalchemy, psycopg2-binary, python-dotenv, pandas).
+corre (sqlalchemy, psycopg2-binary, python-dotenv, pandas). Variable de
+entorno opcional `TARGET_DATE` (`YYYY-MM-DD`) para fijar la fecha objetivo en
+pruebas/backfills manuales sin tocar código -- ver `resolve_target_date()`.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -65,6 +80,38 @@ PIPELINE_SCRIPT = ROOT_DIR / "data" / "pipelines" / "pipeline.py"
 PIPELINE_VENV_PYTHON = ROOT_DIR / "data" / "pipelines" / ".venv" / "bin" / "python"
 
 
+# --- Observabilidad -----------------------------------------------------
+# INFO para eventos normales (inicio, fin, omision por duplicado/lock);
+# ERROR para excepciones. Cada linea lleva timestamp (%(asctime)s), el
+# nombre del job y el estado resultante como campos estructurados (no solo
+# texto libre), para poder grepear "status=failed" en el log sin parsear
+# frases. cron redirige stdout (ver infra/nightly_export.cron) a un archivo,
+# asi que un StreamHandler a stdout es "el log".
+_LOG_FORMAT = "%(asctime)s %(levelname)s job=%(job)s status=%(status)s - %(message)s"
+
+
+def _build_logger() -> logging.Logger:
+    logger = logging.getLogger("nightly_export")
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False  # no duplicar en el root logger
+    return logger
+
+
+_logger = _build_logger()
+
+
+def _log_info(status: str, message: str, *args: object) -> None:
+    _logger.info(message, *args, extra={"job": JOB_NAME, "status": status})
+
+
+def _log_error(status: str, message: str, *args: object) -> None:
+    _logger.error(message, *args, extra={"job": JOB_NAME, "status": status})
+
+
 def resolve_target_date() -> date:
     raw_value = os.environ.get("TARGET_DATE")
     if raw_value:
@@ -81,7 +128,7 @@ def export_telemetry_csv(target_date: date) -> Path:
     """
     csv_path = RAW_DIR / f"telemetry_{target_date.isoformat()}.csv"
     if csv_path.exists():
-        print(f"[nightly_export] {csv_path} ya existe, no se vuelve a exportar.")
+        _log_info("csv_exists", "%s ya existe, no se vuelve a exportar.", csv_path)
         return csv_path
 
     day_start = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
@@ -104,7 +151,7 @@ def export_telemetry_csv(target_date: date) -> Path:
 
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     events_df.to_csv(csv_path, index=False)
-    print(f"[nightly_export] {len(events_df)} eventos exportados a {csv_path}.")
+    _log_info("csv_exported", "%d eventos exportados a %s.", len(events_df), csv_path)
     return csv_path
 
 
@@ -117,26 +164,28 @@ def run_pipeline_subprocess(target_date: date) -> None:
     python_exe = str(PIPELINE_VENV_PYTHON) if PIPELINE_VENV_PYTHON.exists() else sys.executable
     iso_week = iso_week_for(target_date)
     command = [python_exe, str(PIPELINE_SCRIPT), "--iso-week", iso_week, "--trigger", "scheduled"]
-    print(f"[nightly_export] Lanzando pipeline: {' '.join(command)}")
+    _log_info("pipeline_launch", "Lanzando pipeline: %s", " ".join(command))
 
     result = subprocess.run(command, capture_output=True, text=True)
     if result.stdout:
-        print(result.stdout)
+        _log_info("pipeline_output", "%s", result.stdout.rstrip())
     if result.returncode != 0:
         raise RuntimeError(f"pipeline.py fallo (exit {result.returncode}): {result.stderr[-2000:]}")
 
 
 def main() -> None:
     target_date = resolve_target_date()
+    _log_info("started", "Job iniciado para target_date=%s.", target_date)
+
     engine = job_runner_db.get_engine()
     job_runner.ensure_schema(engine)
 
     if job_runner.has_processing_lock(engine, JOB_NAME):
-        print(f"[nightly_export] Ya hay una corrida 'processing' para '{JOB_NAME}'; cancelado (lock).")
+        _log_info("skipped_lock", "Ya hay una corrida 'processing' para '%s'; cancelado.", JOB_NAME)
         return
 
     if job_runner.has_completed_for_date(engine, JOB_NAME, target_date):
-        print(f"[nightly_export] Ya hay una corrida 'completed' para {JOB_NAME}/{target_date}; cancelado (duplicado).")
+        _log_info("skipped_duplicate", "Ya hay una corrida 'completed' para %s/%s; cancelado.", JOB_NAME, target_date)
         return
 
     try:
@@ -146,7 +195,7 @@ def main() -> None:
         # INSERT (la constraint de schema.py es lo que realmente lo
         # garantiza). Mismo desenlace que el chequeo previo: cancelar sin
         # marcar failed, esto no es un error del job.
-        print(f"[nightly_export] {exc} Cancelado (lock).")
+        _log_info("skipped_lock", "%s Cancelado.", exc)
         return
 
     try:
@@ -159,16 +208,15 @@ def main() -> None:
         # matando el proceso con SIGTERM->KeyboardInterrupt), que Exception
         # no captura. mark_failed() siempre corre antes de propagar.
         job_runner.mark_failed(engine, run_id, str(exc))
-        # print() (no el modulo logging, para no introducir una dependencia
-        # de configuracion de logging en un script de cron): infra/nightly_export.cron
-        # redirige stdout/stderr a logs/nightly_export.log, asi que esto es
-        # el log. El `raise` de abajo ademas hace que el proceso termine con
-        # exit != 0 y la traceback completa en ese mismo log.
-        print(f"[nightly_export] FALLO: {exc}")
+        _log_error("failed", "%s", exc)
+        # El `raise` (sin exc_info en el log, para no duplicar la traceback)
+        # hace que el proceso termine con exit != 0; cron redirige tambien
+        # stderr (ver infra/nightly_export.cron), asi que la traceback
+        # completa queda igual en el mismo log.
         raise
     else:
         job_runner.mark_completed(engine, run_id)
-        print(f"[nightly_export] OK: {JOB_NAME}/{target_date} (run_id={run_id}).")
+        _log_info("completed", "%s/%s terminado (run_id=%s).", JOB_NAME, target_date, run_id)
 
 
 if __name__ == "__main__":
