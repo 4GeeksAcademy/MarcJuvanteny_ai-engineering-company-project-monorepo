@@ -152,8 +152,18 @@ def main() -> None:
     try:
         export_telemetry_csv(target_date)
         run_pipeline_subprocess(target_date)
-    except Exception as exc:
+    except BaseException as exc:
+        # BaseException, no Exception: la invariante es "ningun registro
+        # puede quedar en 'processing' tras una ejecucion fallida", y eso
+        # incluye un KeyboardInterrupt/SystemExit (Ctrl+C, timeout externo
+        # matando el proceso con SIGTERM->KeyboardInterrupt), que Exception
+        # no captura. mark_failed() siempre corre antes de propagar.
         job_runner.mark_failed(engine, run_id, str(exc))
+        # print() (no el modulo logging, para no introducir una dependencia
+        # de configuracion de logging en un script de cron): infra/nightly_export.cron
+        # redirige stdout/stderr a logs/nightly_export.log, asi que esto es
+        # el log. El `raise` de abajo ademas hace que el proceso termine con
+        # exit != 0 y la traceback completa en ese mismo log.
         print(f"[nightly_export] FALLO: {exc}")
         raise
     else:

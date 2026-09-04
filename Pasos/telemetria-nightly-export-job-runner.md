@@ -41,6 +41,7 @@ services/job_runner/                 # módulo de control de estado (Fase "Contr
   tests/test_runner.py                # contra SQLite en memoria
 
 scripts/nightly_export.py            # script principal (Fase "Script principal")
+scripts/tests/test_nightly_export.py # maquina de estados de main() contra SQLite (lock, idempotencia, failed/BaseException)
 infra/nightly_export.cron            # expresión cron + justificación del horario
 ```
 
@@ -126,6 +127,24 @@ imports absolutos (`import runner as job_runner`).
   `start_job_run`, `mark_completed`, `mark_failed`, `get_latest_job_run` —
   sin ningún `job_name` hardcodeado dentro del módulo (lo pasa el llamador),
   así que sirve para cualquier job futuro, no solo `nightly_export`.
+- [x] **Cualquier excepción no controlada se captura, actualiza el estado a
+  `failed` con el mensaje de error, y se propaga al log**
+  (`scripts/nightly_export.py::main()`): el `try` que envuelve
+  `export_telemetry_csv()` + `run_pipeline_subprocess()` atrapa
+  `BaseException` (no solo `Exception` — a propósito, ver el punto
+  siguiente), llama a `job_runner.mark_failed(engine, run_id, str(exc))` y
+  después hace `print(...)` (lo que cron redirige al log, ver
+  `infra/nightly_export.cron`) seguido de `raise` — el proceso termina con
+  `exit != 0` y la traceback completa queda en ese mismo log.
+- [x] **Ningún registro puede quedar en `processing` tras una ejecución
+  fallida**: por eso el `except` de arriba captura `BaseException`, no
+  `Exception` — un `KeyboardInterrupt`/`SystemExit` (Ctrl+C, o un `SIGTERM`
+  externo que Python traduce a `KeyboardInterrupt`) no hereda de
+  `Exception`, así que un `except Exception` los dejaría pasar sin marcar
+  `failed`, y la fila quedaría `processing` para siempre (el lock de
+  "Idempotencia y bloqueo" de arriba se quedaría atascado bloqueando toda
+  corrida futura). Verificado explícitamente en
+  `scripts/tests/test_nightly_export.py::test_keyboard_interrupt_also_marks_failed_not_left_processing`.
 
 ## Cómo se verificó
 
@@ -135,12 +154,22 @@ prueba contra el proyecto real.
 - `services/job_runner/tests/test_runner.py` (5 tests, `pytest`) contra
   SQLite en memoria: lock, idempotencia por fecha, `mark_completed`/`mark_failed`,
   y que jobs con distinto `job_name` no comparten el lock.
-- `scripts/nightly_export.py` en sí **no tiene tests automatizados en el
-  repo** (mismo motivo que `services/reporting/`: ningún script/servicio del
-  monorepo trae `tests/` junto al código que golpea Supabase directo salvo
-  `data/pipelines/`). Se verificó con un script manual de smoke-test (no
-  comiteado) que corre `main()` de verdad contra SQLite + un subproceso
-  **real** de `data/pipelines/pipeline.py`, tres escenarios:
+- `scripts/tests/test_nightly_export.py` (5 tests, `pytest`, agregado junto
+  con el checklist de "Control de estado" de arriba): la máquina de estados
+  de `main()` contra SQLite, con `export_telemetry_csv`/`run_pipeline_subprocess`
+  monkeypatcheados (el I/O real de archivo + subproceso real se ejercita en
+  el smoke test manual de abajo, no aquí, para que este `pytest` sea rápido
+  y determinista) —
+  lock (no toca la fila `processing` existente), idempotencia por
+  `target_date` (no reexporta ni relanza), fallo normal (`RuntimeError` →
+  `failed`, nunca `processing`), **`KeyboardInterrupt` → también `failed`**
+  (la razón concreta de capturar `BaseException` y no solo `Exception`), y
+  éxito → `completed`.
+- `scripts/nightly_export.py` **de punta a punta** (export real de CSV +
+  subproceso **real** de `data/pipelines/pipeline.py`, no monkeypatcheado) se
+  verificó aparte con un script manual de smoke-test (no comiteado — mismo
+  motivo que `services/reporting/`: ningún otro script/servicio del monorepo
+  trae ese tipo de prueba salvo `data/pipelines/`), tres escenarios:
   1. Corrida normal: exporta el CSV, lanza el subproceso, el subproceso
      falla (Supabase no configurado) → `job_runs` queda `failed` con el
      `stderr` real del subproceso como `error_message`, y el script
@@ -191,7 +220,8 @@ prueba contra el proyecto real.
    `POST /reporting/exec-weekly/run`), sería un cuarto endpoint en
    `services/reporting/` o un servicio propio — no pedido por esta guía, no
    implementado.
-4. `services/job_runner/tests/` no corre en el mismo `pytest` que
-   `data/pipelines/tests/` (venvs separados) — si se agrega CI, cada paquete
-   necesita su propio paso (`cd services/job_runner && pytest`,
-   `cd data/pipelines && pytest`).
+4. `services/job_runner/tests/`, `scripts/tests/` y `data/pipelines/tests/`
+   corren en tres `pytest` separados (venvs distintos) — si se agrega CI,
+   cada uno necesita su propio paso (`cd services/job_runner && pytest`,
+   `cd data/pipelines && pytest`; `scripts/tests/` reusa el venv de
+   `job_runner`, así que puede ir en el mismo paso que ese).
