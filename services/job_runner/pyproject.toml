@@ -1,0 +1,21 @@
+[project]
+name = "job-runner"
+version = "0.1.0"
+description = "Control de estado de jobs de scheduling (ops.job_runs): usado por scripts/nightly_export.py"
+requires-python = ">=3.12"
+dependencies = [
+    "sqlalchemy>=2.0.0,<3.0.0",
+    "psycopg2-binary>=2.9.12",
+    "python-dotenv>=1.0.1,<2.0.0",
+    # No es una dependencia de job_runner en si (solo hace SELECT/INSERT/UPDATE
+    # planos con sqlalchemy.text), pero scripts/nightly_export.py la usa para
+    # armar el CSV de exportacion y comparte este mismo entorno.
+    "pandas>=2.2.0,<3.0.0",
+]
+
+[tool.setuptools]
+py-modules = ["config", "db", "runner", "schema"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"

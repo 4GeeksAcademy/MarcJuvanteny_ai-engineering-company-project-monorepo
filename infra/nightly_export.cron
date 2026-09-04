@@ -1,0 +1,13 @@
+# scripts/nightly_export.py — exportacion nocturna de telemetria + disparo
+# del pipeline de KPIs (ver el docstring de ese script y
+# Pasos/telemetria-nightly-export-job-runner.md para el detalle completo).
+#
+# 02:00 UTC, todos los dias. TARGET_DATE por defecto es "ayer UTC": correrlo
+# a las 02:00 (no a medianoche exacta) da 2h de margen a que cualquier
+# escritura tardia de telemetry_events del dia anterior ya haya llegado,
+# antes de que arranque el horario laboral en LA (UTC-7/8) o ZGZ (UTC+1/2).
+# Es idempotente (lock + idempotencia por target_date en ops.job_runs), asi
+# que un solape con la corrida anterior o un re-run manual son seguros.
+#
+# Instalar (crontab -e), ajustando <REPO_ROOT> y el venv real:
+0 2 * * * cd <REPO_ROOT> && <REPO_ROOT>/services/job_runner/.venv/bin/python scripts/nightly_export.py >> <REPO_ROOT>/logs/nightly_export.log 2>&1
