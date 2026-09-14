@@ -1,0 +1,8 @@
+# Deps de generate_trackflow_sales_dataset.py y train_sales_forecast.py
+# (y de tests/pipelines/test_sales_forecast_split.py). El resto de scripts/
+# no las necesita -- ver el README de esta carpeta.
+pandas>=2.2.0,<4.0.0
+numpy>=1.26.0,<3.0.0
+scikit-learn>=1.4.0,<2.0.0
+matplotlib>=3.8.0,<4.0.0
+pytest>=8.0.0,<10.0.0
