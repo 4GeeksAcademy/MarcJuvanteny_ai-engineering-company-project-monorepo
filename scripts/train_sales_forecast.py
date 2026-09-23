@@ -1,6 +1,8 @@
 """Entrenamiento del modelo de regresión de ingresos de TrackFlow.
 
-Implementa `CONTEXT/CONTEXTPredicción.md`: carga `data/raw/trackflow_sales.csv`
+Implementa `CONTEXT/CONTEXT5.md` (evolución de `CONTEXT/CONTEXTPredicción.md`,
+ver `Pasos/sales-forecast-model.md` y `Pasos/sales-forecast-evaluation.md`):
+carga `data/raw/trackflow_sales.csv`
 (fila `consolidated`), separa los primeros 8 años como entrenamiento y los 2
 más recientes como prueba, entrena un `RandomForestRegressor`, y calcula
 MSE, PSI, Gini y "K2 Score" sobre el conjunto de prueba.
@@ -73,6 +75,28 @@ para meses de 2024-2025. La predicción final es
   a corregir primero — documentado también en
   `Pasos/sales-forecast-model.md`.
 
+## Features de lag/rolling (`CONTEXT5.md`, Sección 6)
+
+Además del residuo estacional (mes/seno/coseno), el Random Forest recibe
+`lag_1`, `lag_12`, `rolling_mean_3` y `rolling_std_3` — calculados sobre
+`seasonal_ratio` (no sobre `revenue_eur` crudo, para compartir escala con el
+resto de features), **una sola vez sobre toda la serie ordenada
+cronológicamente, antes de particionar train/test** (`add_lag_rolling_features()`).
+Como cada valor depende solo de filas estrictamente anteriores (`.shift()`),
+es estructuralmente imposible que una fila de train "vea" un valor calculado
+con datos de una fila de test futura — sin importar dónde caiga después el
+límite del split (o de un fold de validación cruzada, ver
+`evaluate_sales_forecast.py`). El `.rolling(3)` va **después** de un
+`.shift(1)`, no antes: sin ese shift, la ventana de 3 meses incluye la fila
+actual, y `rolling_mean_3` terminaría usando el propio valor a predecir como
+parte de su propio predictor.
+
+`lag_12` necesita 12 meses de historia — las primeras 12 filas de
+entrenamiento (todo 2016) quedan sin ese feature (`NaN`) y se descartan
+(`dropna`, ver `prepare_train_test_features()`); las filas de prueba
+(2024-2025) siempre tienen historia suficiente porque llegan después de 8
+años de entrenamiento.
+
 Ejecución: `python scripts/train_sales_forecast.py` (requiere
 `scripts/requirements-sales-forecast.txt`: pandas, numpy, scikit-learn,
 matplotlib).
@@ -102,13 +126,17 @@ TRAIN_YEARS = 8
 TEST_YEARS = 2
 RANDOM_STATE = 42
 
-# Features del Random Forest: SOLO el componente ciclico (mes del anio). El
+# Features del Random Forest: componente ciclico (mes del anio) + lag/rolling
+# causales (ver "Features de lag/rolling" en el docstring del modulo). El
 # componente de tendencia (crecimiento compuesto anual) NO se le pasa al
 # Random Forest -- ver fit_trend_model() y la nota "Por que trend+residuo"
 # mas abajo sobre por que un modelo de arboles no puede extrapolar tendencia.
 SEASONAL_FEATURE_COLUMNS = ["month_num", "month_sin", "month_cos"]
+LAG_FEATURE_COLUMNS = ["lag_1", "lag_12", "rolling_mean_3", "rolling_std_3"]
+MODEL_FEATURE_COLUMNS = SEASONAL_FEATURE_COLUMNS + LAG_FEATURE_COLUMNS
 TREND_FEATURE_COLUMNS = ["time_index"]
 TARGET_COLUMN = "revenue_eur"
+RATIO_COLUMN = "seasonal_ratio"
 
 
 def load_full_dataset(csv_path: Path = DEFAULT_CSV_PATH) -> pd.DataFrame:
@@ -184,8 +212,23 @@ def build_features(df: pd.DataFrame, base_year: int) -> pd.DataFrame:
     return out
 
 
+def add_lag_rolling_features(df: pd.DataFrame, ratio_col: str = RATIO_COLUMN) -> pd.DataFrame:
+    """`lag_1`, `lag_12`, `rolling_mean_3`, `rolling_std_3` sobre `ratio_col`
+    (el residuo estacional, no `revenue_eur` crudo). Ver la sección
+    "Features de lag/rolling" en el docstring del módulo para el porqué del
+    orden `.shift(1)` -> `.rolling(3)` y de calcular esto antes del split.
+    """
+    out = df.sort_values("month").reset_index(drop=True).copy()
+    shifted = out[ratio_col].shift(1)
+    out["lag_1"] = shifted
+    out["lag_12"] = out[ratio_col].shift(12)
+    out["rolling_mean_3"] = shifted.rolling(3).mean()
+    out["rolling_std_3"] = shifted.rolling(3).std()
+    return out
+
+
 def scale_features(
-    train_df: pd.DataFrame, test_df: pd.DataFrame, feature_columns: list[str] = SEASONAL_FEATURE_COLUMNS
+    train_df: pd.DataFrame, test_df: pd.DataFrame, feature_columns: list[str] = MODEL_FEATURE_COLUMNS
 ) -> tuple[np.ndarray, np.ndarray, StandardScaler]:
     """Escala las features numericas; el scaler se ajusta solo con train (nunca con test)."""
     scaler = StandardScaler()
@@ -302,45 +345,67 @@ def plot_forecast(test_df: pd.DataFrame, y_pred: np.ndarray, lower: np.ndarray, 
     plt.close(fig)
 
 
-def run(csv_path: Path = DEFAULT_CSV_PATH) -> dict[str, float]:
+def prepare_train_test_features(csv_path: Path = DEFAULT_CSV_PATH) -> tuple[pd.DataFrame, pd.DataFrame, LinearRegression]:
+    """Pipeline completo de features, compartido por `run()` (entrenamiento
+    final) y `evaluate_sales_forecast.py` (validación cruzada / curva de
+    aprendizaje, que solo debe tocar el `train_features` devuelto acá).
+
+    Devuelve `(train_features, test_features, trend_model)`: `train_features`
+    ya sin las primeras filas con `lag_12` en `NaN` (ver `add_lag_rolling_features`).
+    """
     consolidated = load_consolidated_sales(csv_path)
     train_df, test_df = split_train_test(consolidated)
+    train_months = set(train_df["month"])
 
     base_year = consolidated["month"].dt.year.min()  # fijo para todo el dataset, ver build_features()
-    train_features = build_features(train_df, base_year)
-    test_features = build_features(test_df, base_year)
+    full_features = build_features(consolidated, base_year)
+
+    train_mask = full_features["month"].isin(train_months)
 
     # 1) Tendencia (extrapolable): ajustada solo con train.
-    trend_model = fit_trend_model(train_features)
-    train_trend = trend_prediction(trend_model, train_features)
-    test_trend = trend_prediction(trend_model, test_features)
+    trend_model = fit_trend_model(full_features[train_mask])
+    full_features = full_features.assign(trend=trend_prediction(trend_model, full_features))
 
     # 2) Residuo estacional (lo que predice el Random Forest): acotado y
     #    ciclico, nunca fuera del rango visto en entrenamiento aunque el
     #    anio sea nuevo.
-    train_features = train_features.assign(seasonal_ratio=train_features[TARGET_COLUMN].to_numpy() / train_trend)
+    full_features = full_features.assign(seasonal_ratio=full_features[TARGET_COLUMN] / full_features["trend"])
+
+    # 3) Lag/rolling sobre la serie completa ya ordenada (ver docstring del modulo).
+    full_features = add_lag_rolling_features(full_features)
+
+    train_features = full_features[full_features["month"].isin(train_months)].dropna(subset=LAG_FEATURE_COLUMNS)
+    train_features = train_features.reset_index(drop=True)
+    test_features = full_features[~full_features["month"].isin(train_months)].reset_index(drop=True)
+
+    return train_features, test_features, trend_model
+
+
+def run(csv_path: Path = DEFAULT_CSV_PATH) -> dict[str, float]:
+    train_features, test_features, _trend_model = prepare_train_test_features(csv_path)
 
     X_train, X_test, _scaler = scale_features(train_features, test_features)
-    y_train_ratio = train_features["seasonal_ratio"].to_numpy()
+    y_train_ratio = train_features[RATIO_COLUMN].to_numpy()
     y_test = test_features[TARGET_COLUMN].to_numpy()
 
     model = train_model(X_train, y_train_ratio)
     ratio_pred, ratio_lower, ratio_upper = predict_with_variability(model, X_test)
 
-    # 3) Recompone: prediccion final = tendencia extrapolada x residuo predicho.
+    # Recompone: prediccion final = tendencia extrapolada x residuo predicho.
+    test_trend = test_features["trend"].to_numpy()
     y_pred = ratio_pred * test_trend
     lower = ratio_lower * test_trend
     upper = ratio_upper * test_trend
 
     full_df = load_full_dataset(csv_path)
     us_share = compute_us_share_by_month(full_df)
-    us_share_train = us_share.loc[train_df["month"]].to_numpy()
-    us_share_test = us_share.loc[test_df["month"]].to_numpy()
+    us_share_train = us_share.loc[train_features["month"]].to_numpy()
+    us_share_test = us_share.loc[test_features["month"]].to_numpy()
 
     metrics = compute_metrics(y_test, y_pred, us_share_train, us_share_test)
 
     EVAL_DIR.mkdir(parents=True, exist_ok=True)
-    plot_forecast(test_df, y_pred, lower, upper, EVAL_DIR / "prediction_vs_actual.png")
+    plot_forecast(test_features, y_pred, lower, upper, EVAL_DIR / "prediction_vs_actual.png")
     (EVAL_DIR / "metrics.json").write_text(json.dumps(metrics, indent=2))
 
     return metrics

@@ -1,7 +1,7 @@
 {
-  "mse_eur2": 412209223.52352905,
-  "rmse_pct_of_avg_monthly_revenue": 4.7509589071318885,
-  "psi_us_share_train_vs_test": 0.17561120713284267,
-  "gini_normalized": 0.912363933242089,
-  "k2_score_r2": 0.8586604110821486
+  "mse_eur2": 1518919613.6434135,
+  "rmse_pct_of_avg_monthly_revenue": 3.000086804479705,
+  "psi_us_share_train_vs_test": 0.0498504873992846,
+  "gini_normalized": 0.9352817537923331,
+  "k2_score_r2": 0.9481083992979004
 }
