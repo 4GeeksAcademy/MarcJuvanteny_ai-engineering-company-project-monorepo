@@ -86,7 +86,7 @@ def test_eval_retrieve_executes_before_generate_in_the_trace():
     )
 
     node_order = [step["node"] for step in trace]
-    assert node_order == ["receive_question", "retrieve", "generate"]
+    assert node_order == ["receive_question", "classify_intent", "retrieve", "generate"]
     assert node_order.index("retrieve") < node_order.index("generate")
     assert state["answer"] == "texto de ejemplo"
 
@@ -123,7 +123,7 @@ def test_eval_no_context_routes_to_honest_answer_without_calling_generate():
     )
 
     node_order = [step["node"] for step in trace]
-    assert node_order == ["receive_question", "retrieve", "no_context"]
+    assert node_order == ["receive_question", "classify_intent", "retrieve", "no_context"]
     assert state["answer"] == agent_graph.NO_CONTEXT_ANSWER
 
 
@@ -194,12 +194,102 @@ def test_eval_answer_stays_anchored_to_the_real_knowledge_base():
     question = "¿puede un account manager ofrecer un descuento de almacenamiento sin aprobación?"
     state, trace, _thread_id = agent_graph.run_agent(question, retrieve_fn=retrieve_fn, generate_fn=_echo_generate)
 
-    assert [step["node"] for step in trace] == ["receive_question", "retrieve", "generate"]
+    assert [step["node"] for step in trace] == ["receive_question", "classify_intent", "retrieve", "generate"]
     assert any("Miguel Torres" in chunk["text"] for chunk in state["context"]), (
         "el contexto recuperado no incluye la entidad esperada (Miguel Torres) -- "
         "la respuesta no puede estar anclada si el contexto ya no lo esta"
     )
     assert "Miguel Torres" in state["answer"]  # la respuesta final tambien la conserva (echo fiel del contexto)
+
+
+# --- Enrutamiento: tool vs. RAG (CONTEXT7.md, "Tracing y evaluación") ------
+
+
+def test_eval_ticket_question_resolves_with_tool_not_rag():
+    """"Una pregunta que debe resolverse con una tool (no con el RAG)"."""
+    from tools.incidents_tool import IncidentSummary, IncidentToolOutput
+
+    def fake_incidents_tool(query):
+        assert query.incident_id == 42
+        return IncidentToolOutput(
+            ok=True,
+            incidents=[
+                IncidentSummary(
+                    id=42,
+                    title="Paquete perdido",
+                    status="open",
+                    category="lost_parcel",
+                    origin="customer",
+                    branch="la_warehouse",
+                    created_at="2026-01-01T00:00:00Z",
+                    updated_at="2026-01-01T00:00:00Z",
+                )
+            ],
+        )
+
+    state, trace, _thread_id = agent_graph.run_agent(
+        "¿cuál es el estado del ticket 42?",
+        incidents_tool_fn=fake_incidents_tool,
+        generate_fn=_echo_generate,
+        retrieve_fn=_refuse_to_be_called,  # el RAG NUNCA debe llamarse en esta ruta
+    )
+
+    node_order = [step["node"] for step in trace]
+    assert node_order == ["receive_question", "classify_intent", "incidents_tool", "generate"]
+    assert "retrieve" not in node_order
+    assert state["route"] == "incidents_tool"
+    assert "open" in state["answer"]
+
+
+def test_eval_policy_question_resolves_with_rag_not_tool():
+    """"Una pregunta que debe resolverse con el RAG (no con una tool)"."""
+
+    def fake_retrieve(question: str):
+        return [{"source_document": "sla-delivery", "section": "Resumen", "text": "texto de politica"}]
+
+    state, trace, _thread_id = agent_graph.run_agent(
+        "¿cuál es el SLA de entrega estándar?",
+        retrieve_fn=fake_retrieve,
+        generate_fn=_echo_generate,
+        incidents_tool_fn=_refuse_to_be_called,  # ninguna tool debe llamarse en esta ruta
+        inventory_tool_fn=_refuse_to_be_called,
+    )
+
+    node_order = [step["node"] for step in trace]
+    assert node_order == ["receive_question", "classify_intent", "retrieve", "generate"]
+    assert "incidents_tool" not in node_order and "inventory_tool" not in node_order
+    assert state["route"] == "rag"
+    assert state["answer"] == "texto de politica"
+
+
+def test_eval_incidents_service_unavailable_falls_back_honestly():
+    """(Opcional) Fallback cuando el servicio de incidentes no está
+    disponible: la tool devuelve `ok=False` (simulando un `ConnectError` real
+    de `httpx`, no solo un valor a mano) y el agente responde con honestidad,
+    sin llamar nunca al modelo de generación."""
+    import httpx
+
+    from tools.incidents_tool import IncidentQueryInput, query_incidents
+
+    def unavailable_transport_handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Connection refused", request=request)
+
+    def real_incidents_tool_against_down_backend(query: IncidentQueryInput):
+        with httpx.Client(transport=httpx.MockTransport(unavailable_transport_handler)) as client:
+            return query_incidents(query, client=client)
+
+    state, trace, _thread_id = agent_graph.run_agent(
+        "¿cuál es el estado del ticket 7?",
+        incidents_tool_fn=real_incidents_tool_against_down_backend,
+        generate_fn=_refuse_to_be_called,  # nunca debe inventar un estado llamando al LLM
+        retrieve_fn=_refuse_to_be_called,
+    )
+
+    node_order = [step["node"] for step in trace]
+    assert node_order == ["receive_question", "classify_intent", "incidents_tool", "tool_failed"]
+    assert state["tool_result"]["ok"] is False
+    assert "connection_error" in state["tool_result"]["error"]
+    assert "No pude confirmar" in state["answer"]  # honesto, no inventa un estado
 
 
 # --- Checkpointing: la corrida queda inspeccionable -------------------------

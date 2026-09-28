@@ -14,11 +14,12 @@ dependencies = [
     "qdrant-client>=1.13,<1.15",
     "openai>=1.0.0,<4.0.0",
     "langgraph>=1.2.12",
+    "httpx>=0.28.1",
 ]
 
 [tool.setuptools]
 py-modules = ["main", "schemas", "pipeline_path", "agent_graph"]
-packages = ["routers"]
+packages = ["routers", "tools"]
 
 [build-system]
 requires = ["setuptools>=68.0"]
