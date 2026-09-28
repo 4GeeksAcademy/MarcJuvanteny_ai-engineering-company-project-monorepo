@@ -1,0 +1,24 @@
+[project]
+name = "knowledge-api"
+version = "0.1.0"
+description = "TrackFlow knowledge base API: POST /knowledge/query sobre el RAG (data/pipelines/rag.py)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0,<1.0.0",
+    "uvicorn[standard]>=0.30.0,<1.0.0",
+    "pydantic>=2.9.0,<3.0.0",
+    "python-dotenv>=1.0.1,<2.0.0",
+    # No son dependencias de este servicio en si (solo llama a query() de
+    # data/pipelines/rag.py, via sys.path), pero corren en el mismo proceso
+    # -- mismo trade-off que services/reporting/ con data/pipelines/.
+    "qdrant-client>=1.13,<1.15",
+    "openai>=1.0.0,<4.0.0",
+]
+
+[tool.setuptools]
+py-modules = ["main", "schemas", "pipeline_path"]
+packages = ["routers"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
