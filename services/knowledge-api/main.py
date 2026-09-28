@@ -1,9 +1,11 @@
-"""`services/knowledge-api/` — FastAPI app (CONTEXT7.md, Fase 3).
+"""`services/knowledge-api/` — FastAPI app (CONTEXT7.md, Fase 3 + "Grafo del agente").
 
 App independiente, sibling de `services/incidents-api/` y
 `services/reporting/`. Capa HTTP fina: no calcula embeddings, no habla con
 Qdrant ni con el LLM directamente — todo eso vive en `data/pipelines/rag.py`
-(Fase 2) y `data/process/rag.py` (Fase 1).
+(Fase 2), `data/process/rag.py` (Fase 1) y `agent_graph.py` (grafo del
+agente). `POST /agent/query` convive con `POST /knowledge/query` (no lo
+reemplaza) en el mismo servicio.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from routers.agent import router as agent_router
 from routers.knowledge import router as knowledge_router
 
 app = FastAPI(title="Knowledge API", version="0.1.0")
@@ -31,6 +34,7 @@ app.add_middleware(
 )
 
 app.include_router(knowledge_router)
+app.include_router(agent_router)
 
 
 @app.get("/health")

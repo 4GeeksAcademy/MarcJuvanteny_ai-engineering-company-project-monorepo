@@ -1,7 +1,7 @@
 [project]
 name = "knowledge-api"
 version = "0.1.0"
-description = "TrackFlow knowledge base API: POST /knowledge/query sobre el RAG (data/pipelines/rag.py)"
+description = "TrackFlow knowledge base API: POST /knowledge/query (RAG) + POST /agent/query (grafo LangGraph)"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0,<1.0.0",
@@ -13,12 +13,18 @@ dependencies = [
     # -- mismo trade-off que services/reporting/ con data/pipelines/.
     "qdrant-client>=1.13,<1.15",
     "openai>=1.0.0,<4.0.0",
+    "langgraph>=1.2.12",
 ]
 
 [tool.setuptools]
-py-modules = ["main", "schemas", "pipeline_path"]
+py-modules = ["main", "schemas", "pipeline_path", "agent_graph"]
 packages = ["routers"]
 
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

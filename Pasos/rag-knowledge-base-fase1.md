@@ -1,16 +1,21 @@
-# RAG de TrackFlow — Fases 1-6 (datos, recuperación/generación, endpoint, UI, tests, eval, diseño)
+# RAG de TrackFlow — Fases 1-6 + grafo del agente (LangGraph)
 
-Fecha: 2026-09-24 (Fase 1) — actualizado 2026-09-28 (Fases 2-6)
+Fecha: 2026-09-24 (Fase 1) — actualizado 2026-09-28 (Fases 2-6) — actualizado
+2026-09-28 (Grafo del agente)
 
 Implementación completa de `CONTEXT/CONTEXT7.md` (Hito 7 — RAG y Base de
 Conocimiento): setup del entorno, Fase 1 (preparación de datos e indexación,
 `data/process/`), Fase 2 (recuperación + generación, `data/pipelines/`),
 Fase 3 (endpoint HTTP, `services/knowledge-api/`), Fase 4 (UI mínima,
 `uis/backoffice`), Fase 5 (pruebas unitarias, `tests/pipelines/test_rag.py`),
-Fase 5b (eval de retrieval / Recall@3, `data/eval/evaluate_retrieval.py`) y
-Fase 6 (documento de diseño, `docs/rag/rag-design.md`). No implementado: el
-agente LangGraph que la guía menciona como "proyecto posterior" de la Fase 2
-— no forma parte del checklist actual.
+Fase 5b (eval de retrieval / Recall@3, `data/eval/evaluate_retrieval.py`),
+Fase 6 (documento de diseño, `docs/rag/rag-design.md`) y el **grafo del
+agente** (LangGraph, `services/knowledge-api/agent_graph.py`) — el "proyecto
+posterior" que las Fases 1-6 dejaron marcado como pendiente, ya
+implementado: envuelve `retrieve()`/`generate_answer()` (Fase 2, sin
+duplicarlos) en un grafo con enrutamiento condicional, checkpointing, trace
+consultable, evals, y un endpoint nuevo (`POST /agent/query`) que convive
+con `POST /knowledge/query`.
 
 Antes de leer este documento, leí (por instrucción de AGENTS.md al inicio de
 sesión) `memory-bank/projectbrief.md`, `techContext.md` y `progress.md`, y
@@ -60,11 +65,13 @@ data/pipelines/
   rag.py                   # Fase 2: retrieve(), generate_answer(), query() — reutiliza embed() de data/process/rag.py
 
 services/knowledge-api/    # Fase 3: FastAPI, sibling de incidents-api/reporting
-  main.py                  # app + CORS + registra el router
+  main.py                  # app + CORS + registra los routers
   pipeline_path.py         # agrega data/pipelines/ a sys.path (mismo patron que services/reporting/)
-  routers/knowledge.py     # POST /knowledge/query
-  schemas.py                # QueryRequest/QueryResponse
-  pyproject.toml / requirements.txt / Dockerfile / .env.example
+  routers/knowledge.py     # POST /knowledge/query (Fase 3, RAG)
+  routers/agent.py         # POST /agent/query (grafo del agente) -- convive con el anterior
+  agent_graph.py           # AgentState, nodos, aristas condicionales, build_graph(), run_agent(), get_trace()
+  schemas.py                # QueryRequest/QueryResponse (compartidos por ambos routers)
+  pyproject.toml / requirements.txt / Dockerfile / .env.example   # + langgraph (instalado con `uv add`)
 
 uis/backoffice/
   src/app/(protected)/knowledge/page.tsx    # Fase 4: pagina de consulta
@@ -80,10 +87,16 @@ data/eval/
 
 tests/pipelines/
   test_rag.py               # Fase 5: 17 tests (Fase 1 + Fase 2), Qdrant :memory: + embed_fn/generation_client fake
+  test_agent_graph.py       # Grafo del agente: 7 evals (estructura, 3 rutas, anclaje, checkpointing)
 
 docs/rag/
   rag-design.md              # Fase 6: documento de diseño completo (proceso RAG, chunking, embeddings, Recall@3)
 docker-compose.yml          # + servicios "qdrant" y "knowledge-api"
+
+data/eval/agent-traces/     # generado en tiempo de ejecucion por agent_graph.run_agent() (un .json por thread_id)
+                             # -- NO comiteado (nombres aleatorios, sin valor de referencia estable, a diferencia
+                             #    de retrieval_recall.json); no se agrego a .gitignore porque AGENTS.md restringe
+                             #    tocar ese archivo sin confirmacion explicita -- ver "Decisiones" abajo.
 ```
 
 ## Cómo correrlo
@@ -99,11 +112,13 @@ cp ../process/.env .env && echo "GENERATION_API_BASE=...\nGENERATION_API_KEY=...
 uv run python -c "from rag import query; print(query('¿cuál es la ventana de devolución estándar?'))"
 
 cd ../../services/knowledge-api && cp .env.example .env   # mismas credenciales
-uvicorn main:app --reload --port 8020
+uv add langgraph   # si es la primera vez
+uvicorn main:app --reload --port 8020   # expone /knowledge/query y /agent/query
 
 cd ../../uis/backoffice && npm run dev   # NEXT_PUBLIC_KNOWLEDGE_API_URL en .env.local(.example)
 
-python -m pytest tests/pipelines/test_rag.py -q   # 17 tests, no necesitan Qdrant real ni credenciales
+python -m pytest tests/pipelines/test_rag.py -q          # 17 tests, no necesitan Qdrant real ni credenciales
+python -m pytest tests/pipelines/test_agent_graph.py -q  # 7 evals, correr con services/knowledge-api/.venv (langgraph)
 
 cd data/process && source .venv/bin/activate
 python ../eval/evaluate_retrieval.py   # Recall@3 (embedding lexico local, no necesita credenciales)
@@ -286,6 +301,120 @@ python ../eval/evaluate_retrieval.py   # Recall@3 (embedding lexico local, no ne
   texto antes de embeber (ninguno lingüístico a propósito, solo estructural)
   — sección 4 del documento.
 
+## Checklist de la entrega — Grafo del agente (`services/`)
+
+- [x] **Estado del grafo mínimo, sin historial de conversación**:
+  `AgentState` (`agent_graph.py`) trae `question`, `context`, `answer`,
+  `error` — nada más. Sin historial: cada corrida resuelve una pregunta
+  independiente (mismo contrato que `query()`), documentado el porqué en el
+  docstring del módulo en vez de agregarlo "por si acaso".
+- [x] **Nodos**: `receive_question` (recibe/normaliza la pregunta),
+  `retrieve` (llama a `retrieve()` de `data/pipelines/rag.py`, importado —
+  no duplicado), `generate` (llama a `generate_answer(question, context)`,
+  **no** a `query()`), más `no_context` y `empty_question` para las dos
+  rutas de salida no felices.
+- [x] **Aristas condicionales, no una secuencia fija**: dos condiciones
+  reales — `receive_question` → `empty_question`/`retrieve` según si la
+  pregunta quedó vacía tras `strip()`; `retrieve` → `no_context`/`generate`
+  según si `retrieve()` devolvió algún chunk por encima de `min_score`.
+- [x] **Contrato de nodos respetado**: el nodo `generate` llama a
+  `generate_answer(question, context)` con el `context` que el nodo
+  `retrieve` ya produjo — nunca se usa `query()` dentro de un nodo (eso
+  volvería a ejecutar `retrieve()` internamente y colapsaría el grafo a la
+  secuencia monolítica que la guía pide evitar). Verificado con fakes que
+  lanzan `AssertionError` si se llaman fuera de la rama que les corresponde
+  (`_refuse_to_be_called` en los tests) — si `generate`/`retrieve` se
+  llamaran de más, los tests fallarían con ese assert, no en silencio.
+- [x] **`compile()` antes de checkpointear, falla claro ante un error
+  estructural**: `build_graph()` termina en
+  `graph.compile(checkpointer=...)` — un error real (arista hacia un nodo
+  nunca definido con `add_node()`) hace que `.compile()` lance
+  `ValueError: Found edge ending at unknown node ...` de forma inmediata y
+  legible (verificado explícitamente,
+  `test_compile_fails_clearly_on_structural_error` — probado contra el
+  comportamiento real de LangGraph, no simulado: un nodo simplemente
+  "huérfano" sin arista de entrada **no** hace fallar `compile()` en esta
+  versión de LangGraph, solo una arista a un nodo inexistente o un grafo sin
+  entrypoint desde `START` sí — se verificaron los tres casos a mano antes
+  de escribir el test para no afirmar un comportamiento no confirmado).
+- [x] **Checkpointing en cada transición de estado**: `build_graph()`
+  compila con un `checkpointer` (`MemorySaver` por defecto, inyectable).
+  Cada nodo ejecutado bajo un `thread_id` queda como checkpoint —
+  `compiled_graph.get_state_history(config)` lo confirma
+  (`test_checkpointed_run_is_inspectable_via_state_history`): al menos 2
+  checkpoints por una corrida de 3 nodos, y el más reciente trae el estado
+  final correcto. **Límite documentado**: `MemorySaver` es en memoria del
+  proceso, no persiste entre reinicios — para retomar una corrida después de
+  reiniciar el servicio haría falta `SqliteSaver`/`PostgresSaver`
+  (`langgraph-checkpoint-*`), no incluido en esta entrega (ver "Pendiente").
+
+## Checklist de la entrega — Tracing y evaluación
+
+- [x] **Cada corrida produce un trace consultable, no solo impreso en
+  consola**: `run_agent()` corre con `stream_mode="updates"` (LangGraph
+  emite `{nodo: cambio_de_estado}` en orden real de ejecución), arma una
+  lista `[{"node": ..., "output": ...}, ...]`, y la persiste en
+  `data/eval/agent-traces/<thread_id>.json` — `get_trace(thread_id)` la
+  vuelve a leer después de la corrida (`test_eval_retrieve_executes_before_generate_in_the_trace`
+  verifica el roundtrip completo). No se usó LangSmith (no hay API key de
+  LangSmith en este repo) — el log estructurado propio cumple el mismo
+  requisito ("lo que importa es que el trace sea consultable después de la
+  corrida").
+- [x] **Al menos 3 evals con criterio verificable sobre la respuesta o el
+  trace**: 4 (3 de enrutamiento + 1 de anclaje, ver más abajo), más 2 tests
+  de estructura del grafo y 1 de checkpointing — 7 tests en total en
+  `tests/pipelines/test_agent_graph.py`:
+  1. **Orden del trace** (el ejemplo literal de la guía): para una pregunta
+     con contexto, `retrieve` se ejecuta antes que `generate`
+     (`test_eval_retrieve_executes_before_generate_in_the_trace`).
+  2. **Pregunta vacía**: enruta a `empty_question` sin llamar nunca a
+     `retrieve` (`test_eval_empty_question_routes_to_error_without_calling_retrieve`).
+  3. **Sin contexto por encima del umbral**: enruta a `no_context` sin
+     llamar nunca a `generate`
+     (`test_eval_no_context_routes_to_honest_answer_without_calling_generate`).
+- [x] **Los evals corren contra el trace de una corrida offline, no contra
+  un servicio en vivo repetido**: cada eval invoca `run_agent()` **una vez**
+  con `retrieve_fn`/`generate_fn` inyectados (fakes deterministas, sin red)
+  y hace las aserciones sobre el `trace`/estado que esa corrida produjo —
+  nunca golpea Qdrant ni un LLM real, así que corre igual de rápido y
+  offline la primera vez que la centésima.
+- [x] **Eval de anclaje a la base de conocimiento existente** (no reemplaza
+  la corrección del trace, es adicional):
+  `test_eval_answer_stays_anchored_to_the_real_knowledge_base` — pregunta de
+  política conocida ("¿puede un account manager ofrecer un descuento de
+  almacenamiento sin aprobación?") corre con **`retrieve()` real** (Qdrant
+  `:memory:` indexado de verdad con los 4 documentos + el embedding léxico
+  de Fase 5b, no mockeado) y solo `generate_fn` es un fake "fiel" (devuelve
+  literalmente el texto recuperado, sin pretender simular calidad de LLM).
+  Verifica que "Miguel Torres" (la entidad real de
+  `docs/company-knowledge-base/trackflow-storage-pricing.es.md`) aparece
+  tanto en el `context` recuperado como en la respuesta final — si el
+  anclaje se rompiera (p. ej. alguien cambia el chunking y ese chunk deja de
+  indexarse), este eval fallaría aunque el enrutamiento del grafo siguiera
+  siendo perfecto.
+- [x] **Los evals viven en `tests/pipelines/` y no rompen los tests RAG
+  existentes**: `test_agent_graph.py` (7 tests) es un archivo nuevo,
+  `test_rag.py` (17 tests) no se tocó — ambos corren independientes, ambos
+  siguen en verde.
+
+## Checklist de la entrega — Endpoint (`services/`)
+
+- [x] **`POST /agent/query` convive con `POST /knowledge/query`**: mismo
+  servicio (`services/knowledge-api/`), mismo `main.py`, dos routers
+  registrados (`routers/knowledge.py` sin tocar, `routers/agent.py` nuevo) —
+  no se reemplazó nada existente.
+- [x] **El endpoint no contiene lógica de negocio propia**: `routers/agent.py::query_agent()`
+  solo llama a `run_agent()` y traduce el resultado a HTTP — ningún nodo,
+  ninguna condición de enrutamiento, ninguna llamada a Qdrant/LLM vive en el
+  router (todo eso está en `agent_graph.py`).
+- [x] **Nunca un stack trace crudo, siempre un mensaje claro**: una
+  excepción real durante la corrida del grafo (p. ej. Qdrant caído) →
+  `logger.exception(...)` server-side + `502` con
+  `"No se pudo generar una respuesta en este momento."` al cliente; la ruta
+  `empty_question` del grafo (no es una excepción, es un estado explícito)
+  → `400` con el mensaje concreto (`"La pregunta no puede estar vacía."`) —
+  verificado con `TestClient` para ambos casos.
+
 ## Cómo se verificó
 
 Sin credenciales reales de 4Geeks para `embed()`/generación, se verificó con
@@ -356,10 +485,31 @@ infraestructura real donde fue posible y funciones/clientes falsos donde no:
    para inflar el número, porque eso sería optimizar contra un método que
    el propio documento ya dice que no representa al modelo real.
 
+7. **Grafo del agente** (`services/knowledge-api/agent_graph.py`) —
+   verificado en capas, todas reales salvo Qdrant/LLM (sin credenciales):
+   - Camino feliz, pregunta vacía y sin-contexto probados a mano primero
+     (`python3 -c "..."`, ver el historial de esta sesión) con fakes que
+     lanzan `AssertionError` si se llaman fuera de su rama — confirmó que
+     `retrieve`/`generate` nunca se ejecutan de más antes de escribir el
+     test formal.
+   - `compile()` sobre un grafo roto probado contra el comportamiento **real**
+     de LangGraph (no asumido): se probaron tres variantes a mano (nodo sin
+     arista de entrada, arista a nodo inexistente, grafo sin `START`) — solo
+     las dos últimas hacen fallar `compile()` en esta versión de LangGraph.
+     El test formal usa la que sí falla (arista a nodo inexistente) para no
+     afirmar un comportamiento que no se confirmó.
+   - `test_agent_graph.py` (7 tests) — `python -m pytest tests/pipelines/test_agent_graph.py -q`
+     → `7 passed`, corridos con `services/knowledge-api/.venv` (tiene
+     `langgraph` instalado; `data/process/.venv` no).
+   - `POST /agent/query` verificado con `TestClient` (mismo patrón que
+     `POST /knowledge/query`): `200` con la respuesta del grafo, `400` con
+     pregunta vacía y el mensaje exacto del nodo `empty_question`.
+
 Toda la infraestructura de prueba (contenedores Docker, `.env` locales,
 servidores de desarrollo) se descartó al terminar
 (`docker rm -f`/`docker ps -a` vacío, `.env`/`.env.local` borrados,
-`suppliers.json` revertido a su estado comiteado).
+`suppliers.json` revertido a su estado comiteado, `data/eval/agent-traces/`
+vaciado — ver "Decisiones" sobre por qué no se comitea ese directorio).
 
 ## Decisiones de implementación no cubiertas por la guía genérica
 
@@ -406,6 +556,42 @@ servidores de desarrollo) se descartó al terminar
   `prefers-color-scheme` (preferencia del sistema operativo) — no había
   ningún toggle de tema en la app para replicar, y agregar uno no estaba
   pedido por esta guía (que solo pide "soportar modo claro y oscuro").
+- **Grafo del agente en `services/knowledge-api/`, no un servicio nuevo**:
+  la guía dice "Grafo del agente (`services/`)" y "Endpoint... que
+  reemplace o **conviva** con el endpoint RAG existente" — convivir en el
+  mismo servicio (mismo `main.py`, un router nuevo) es la lectura literal
+  más simple, y evita crear un cuarto servicio (`incidents-api`,
+  `reporting`, `job_runner`, `knowledge-api`) solo para una capa fina que ya
+  depende de exactamente el mismo `data/pipelines/rag.py`.
+- **`MemorySaver` como checkpointer por defecto**: no hay una base de datos
+  designada para persistir checkpoints del agente en este repo, y la guía
+  no la pide explícitamente — `MemorySaver` cumple el requisito literal
+  ("implementa checkpointing... para que una corrida pueda inspeccionarse")
+  dentro del mismo proceso; el límite (no sobrevive un reinicio) queda
+  documentado, no escondido.
+- **Trace propio (JSON en disco) en vez de LangSmith**: no hay credenciales
+  de LangSmith en este repo; la guía explícitamente permite "tu propio log
+  estructurado si no tienes acceso a una [herramienta de tracing]". Se
+  reutilizó el mismo patrón que `data/eval/evaluate_retrieval.py` (archivo
+  JSON, consultable después de la corrida) en vez de inventar un formato
+  nuevo.
+- **`data/eval/agent-traces/` no se agregó a `.gitignore`**: los archivos de
+  trace se generan con nombres de `thread_id` aleatorios (UUID) en cada
+  corrida — no tienen valor de referencia estable como
+  `data/eval/retrieval_recall.json` (que sí se comitea, siempre en la misma
+  ruta, contenido reproducible). Lo correcto sería ignorarlos en
+  `.gitignore`, pero `AGENTS.md` restringe modificar ese archivo sin
+  confirmación explícita del desarrollador — se optó por no comitear el
+  directorio (limpiado a mano tras verificar) en vez de tocar `.gitignore`
+  sin permiso.
+- **Eval de anclaje con `retrieve()` real, no completamente fake**: los
+  otros 3 evals de enrutamiento sí usan `retrieve_fn` fake (no necesitan
+  datos reales, solo verifican qué nodo se ejecuta), pero el eval de
+  anclaje específicamente necesita que el contexto recuperado sea real
+  (contra el corpus real) para que la aserción "Miguel Torres aparece en la
+  respuesta" signifique algo — con un `retrieve_fn` fake devolviendo
+  cualquier texto, ese eval se volvería circular (probaría que el fake dice
+  lo que el fake dice, no que el sistema está anclado).
 
 ## Pendiente / siguientes pasos
 
@@ -424,10 +610,21 @@ servidores de desarrollo) se descartó al terminar
    y el 80% de Recall@3 medido con el embedding léxico no es representativo
    de la calidad del modelo de producción (ver la salvedad en Fase 5b y en
    `docs/rag/rag-design.md` §5).
-4. El agente LangGraph que la guía menciona como "proyecto posterior" de la
-   Fase 2 — fuera del alcance de esta entrega, pero `retrieve()`/
-   `generate_answer()` ya están separados y son inyectables pensando en eso.
+4. ~~El agente LangGraph que la guía menciona como "proyecto posterior" de la
+   Fase 2~~ — **hecho**, ver "Grafo del agente" arriba.
 5. `services/knowledge-api/` no tiene tests automatizados propios en el
-   repo — se verificó con un script manual de `TestClient` (no comiteado),
-   mismo criterio que `services/reporting/` y `services/job_runner/` en
-   entregas anteriores.
+   repo para `routers/knowledge.py`/`main.py` en sí (sí los tiene para
+   `agent_graph.py`, vía `tests/pipelines/test_agent_graph.py`) — se
+   verificó con un script manual de `TestClient` (no comiteado), mismo
+   criterio que `services/reporting/` y `services/job_runner/` en entregas
+   anteriores.
+6. Checkpointer en memoria (`MemorySaver`): una corrida del agente no se
+   puede retomar después de reiniciar `knowledge-api` (el checkpoint se
+   pierde con el proceso). Para eso haría falta `SqliteSaver` o
+   `PostgresSaver` (`langgraph-checkpoint-sqlite`/`-postgres`), no
+   instalado en esta entrega — no hay una base de datos designada para
+   persistir checkpoints del agente todavía.
+7. `data/eval/agent-traces/` no está en `.gitignore` (ver "Decisiones") —
+   si se sigue generando tráfico real, conviene agregarlo ahí en vez de
+   descartar los archivos a mano cada vez; requiere confirmación explícita
+   del desarrollador por la restricción de `AGENTS.md` sobre ese archivo.
