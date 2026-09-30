@@ -1,6 +1,7 @@
-# MCP Server de TrackFlow — tools sobre Incidents Manager e inventario
+# MCP Server de TrackFlow — tools, OAuth, validación y migración del agente
 
-Fecha: 2026-09-30
+Fecha: 2026-09-30 (Servidor MCP + Autenticación) — actualizado 2026-09-30
+(Validación en MCP Playground + Migración del agente)
 
 Implementación del checklist "Servidor MCP" / "Autenticación y seguridad":
 un MCP Server en Python (`mcps/trackflow-mcp/`, via FastMCP) que expone
@@ -8,7 +9,13 @@ tools reales sobre `services/incidents-api` (gestión de tickets: crear,
 actualizar estado, consultar; e inventario, solo consulta), protegido con
 OAuth 2.1 / OIDC via **MCP Auth** (`mcpauth`) — nunca la capa de
 autenticación integrada de FastMCP, que el checklist prohíbe explícitamente
-para este proyecto.
+para este proyecto. Extendido con la validación manual del servidor (MCP
+Playground, vía el puerto de Codespaces reenviado públicamente) y la
+migración del agente RAG (`services/knowledge-api/agent_graph.py`) para que
+consuma estas mismas tools a través del MCP Server, vía
+`langchain-mcp-adapters`, en vez de llamar directo a `services/incidents-api`
+— la implementación HTTP directa anterior (`tools/incidents_tool.py`,
+`tools/inventory_tool.py`) se eliminó.
 
 Antes de implementar, confirmé con el desarrollador el permiso explícito
 para modificar `mcps/` (ruta restringida por `AGENTS.md` sección 3) — la
@@ -25,6 +32,7 @@ mcps/trackflow-mcp/
   backend_client.py       # Config compartida hacia services/incidents-api (mismo patrón
                            # que services/knowledge-api/tools/backend_client.py)
   logging_middleware.py   # Trazabilidad: tool + cliente + resultado en cada invocación
+  dev_idp_server.py       # Emisor OAuth 2.1/OIDC de DESARROLLO real (proceso HTTP, no solo en tests) -- ver "Validación"
   tools/
     incidents_tools.py    # query_incident, create_incident_ticket, update_incident_status
     inventory_tools.py    # query_inventory, update_inventory_stock (rechazo explícito)
@@ -37,6 +45,16 @@ mcps/trackflow-mcp/
     test_inventory_tools.py
     test_server_integration.py  # Round-trip real: uvicorn + fastmcp.Client, JSON-RPC de verdad
   pyproject.toml / uv.lock / .venv / requirements.txt / .env.example / README.md
+
+services/knowledge-api/     # el agente (ver Pasos/rag-knowledge-base-fase1.md) -- migrado a MCP
+  agent_graph.py             # incidents_tool/inventory_tool ahora son nodos async; llaman a mcp_client.call_mcp_tool
+  mcp_client.py               # cliente MCP del agente (langchain-mcp-adapters) -- NUEVO, reemplaza tools/ (eliminado)
+  intent_extraction.py        # extract_incident_query/extract_inventory_query -- NUEVO, movidas de tools/*.py (eliminado)
+  # eliminados: tools/incidents_tool.py, tools/inventory_tool.py, tools/backend_client.py
+
+tests/pipelines/
+  test_agent_graph.py        # actualizado: nodos/tests async, 2 evals de tool reescritos sin tools/ (eliminado)
+  # eliminado: test_agent_tools.py (testeaba los módulos tools/*.py ya eliminados)
 ```
 
 ## Cómo correrlo
@@ -50,6 +68,13 @@ uv run python server.py
 
 ```bash
 uv run pytest tests/     # 27 tests, sin red ni servicios corriendo
+```
+
+```bash
+# Emisor OAuth de desarrollo (necesario para correr el servidor real o el
+# agente contra él -- ver "Validación (MCP Playground)" más abajo)
+cd mcps/trackflow-mcp
+uv run python dev_idp_server.py   # sirve .well-known/* + POST /mint-token en :9999
 ```
 
 ## Checklist de la entrega — Servidor MCP
@@ -156,6 +181,61 @@ uv run pytest tests/     # 27 tests, sin red ni servicios corriendo
   (`/.well-known/oauth-protected-resource`), pública (sin auth), como
   `server.py::build_app()` la monta en el app raíz junto a la de RFC 8414.
 
+## Checklist de la entrega — Validación (MCP Playground)
+
+- [x] **Servidor real corriendo, con backend real detrás**: `services/incidents-api`
+  levantado con Postgres real (contenedor Docker `postgres:16`, no un mock
+  de SQLModel) + TinyDB local, un usuario creado, un ticket creado — ver
+  "Cómo se verificó" para los comandos exactos. `mcps/trackflow-mcp`
+  apuntado a ese backend real y al emisor OAuth de desarrollo
+  (`dev_idp_server.py`, puerto 9999).
+- [x] **Al menos un flujo completo por cada una de las 5 tools expuestas**:
+  ejecutado con un cliente MCP real (`fastmcp.Client`) contra el servidor
+  real — las 5 corridas y sus respuestas exactas están en "Cómo se
+  verificó". Ninguna simulada.
+- [x] **Comportamiento ante un intento de escritura sobre la tool de
+  inventario, probado y documentado**: `update_inventory_stock_tool`
+  invocada de verdad contra el servidor real → `{"ok": false, "error":
+  "read_only_tool"}` — el mismo código documentado que garantiza
+  `tests/test_inventory_tools.py`, ahora confirmado también en una corrida
+  real, no solo en tests.
+- [ ] **Probado en MCP Playground (mcpplaygroundonline.com) vía URL pública
+  de Codespaces**: el servidor quedó corriendo y verificado end-to-end con
+  un cliente MCP real (ítems anteriores) — el paso de exponer el puerto
+  como público (`gh codespace ports visibility 8010:public`) requiere una
+  acción que un guardrail de seguridad de este entorno bloquea para mí
+  (crear un túnel de ingreso externo), así que ese último paso manual
+  (marcar el puerto público + pegar la URL/token en el sitio) quedó para el
+  desarrollador — ver "Pendiente" para las instrucciones exactas y cómo
+  generar el token.
+
+## Checklist de la entrega — Migración del agente
+
+- [x] **El agente conectado al MCP Server via `langchain-mcp-adapters`**:
+  `services/knowledge-api/mcp_client.py::call_mcp_tool()` — usa
+  `MultiServerMCPClient` (transporte `streamable_http`) real, no un cliente
+  HTTP a mano. Reemplaza el nodo que llamaba directo a
+  `services/incidents-api` (`tools/incidents_tool.py::query_incidents`,
+  ahora eliminado).
+- [x] **Implementación anterior eliminada, no solo deprecada**:
+  `services/knowledge-api/tools/` (los tres archivos: `incidents_tool.py`,
+  `inventory_tool.py`, `backend_client.py`) y
+  `tests/pipelines/test_agent_tools.py` (testeaba esos módulos) se
+  borraron del repo — el agente tiene un único camino posible hacia el
+  Incidents Manager. `agent_graph.py` ya no importa nada de HTTP directo
+  hacia `incidents-api`.
+- [x] **El enrutamiento existente (RAG vs. tools) sigue funcionando
+  igual**: `classify_intent`, `_route_after_classify`,
+  `_route_after_incidents_tool`, `_route_after_inventory_tool`, el camino
+  `"both"` — **ninguno se tocó**. Lo único que cambió es qué hay *dentro*
+  de los nodos `incidents_tool`/`inventory_tool` (antes: HTTP directo;
+  ahora: `await call_mcp_tool(...)`) — mismo contrato de salida
+  (`{"ok", "incidents"|"products", "error"}`) así que
+  `_tool_result_to_context_chunks()` tampoco se tocó. Confirmado con los 10
+  tests de `test_agent_graph.py` (mismos 10 escenarios que antes de migrar,
+  todos en verde) más una corrida real end-to-end contra el MCP Server real
+  (ver "Cómo se verificó").
+
 ## Cómo se verificó
 
 No hay un proveedor OAuth 2.1 / OIDC real configurado en este repo (ni
@@ -230,6 +310,82 @@ nunca asumidos por nombre) para no adivinar una API que no existe:
    `mcps/trackflow-mcp/`): 5 de auth gate en aislamiento, 4 de
    `scopes.py`, 8 de `incidents_tools.py`, 6 de `inventory_tools.py`, 4 de
    integración end-to-end.
+9. **Bug real encontrado y corregido — `auth.py` nunca cargaba `.env`**: al
+   levantar `server.py` por primera vez contra un `.env` real (no inyectado
+   por tests), falló con
+   `RuntimeError: MCPAUTH_ISSUER no esta configurado` a pesar de que
+   `MCPAUTH_ISSUER` sí estaba en `.env`. Causa: `auth.py` lee
+   `os.environ.get("MCPAUTH_ISSUER", ...)` a nivel de módulo, pero solo
+   `backend_client.py` llamaba `load_dotenv()` — y `server.py` importa
+   `auth` **antes** que `tools/*` (que es lo que arrastra
+   `backend_client.py`), así que `.env` todavía no se había cargado cuando
+   `auth.py` leía la variable. No lo cubría ningún test porque los tests
+   inyectan `MCPAuth` directamente (`test_mcp_auth` fixture), sin pasar por
+   `build_mcp_auth_from_env()`. Corregido agregando `load_dotenv()` al
+   propio `auth.py`.
+10. **Backend real levantado para la validación, no solo `httpx.MockTransport`**:
+    para probar las 5 tools con datos genuinos (no simulados, checklist
+    ⚠️ IMPORTANTE) se levantó `services/incidents-api` con un Postgres real
+    (`docker run postgres:16`, tablas creadas por
+    `SQLModel.metadata.create_all()` en el startup real del servicio) +
+    Redis real + TinyDB local, se creó un usuario
+    (`POST /users`, `POST /auth/login`) y un ticket
+    (`POST /api/incidents`) reales. El inventario se auto-sembró al primer
+    `GET /inventory/products` (`seed_inventory_if_empty`, ya existente en
+    `routers/inventory.py`).
+11. **`dev_idp_server.py` — promovido de `tests/dev_idp.py` a un proceso
+    real**: un test genera su propia clave RSA y listo, pero validar
+    manualmente (Playground) y correr el agente real necesitan un emisor
+    que siga vivo entre llamadas y sirva `.well-known/*` por HTTP de
+    verdad — `dev_idp_server.py` (`uv run python dev_idp_server.py`, puerto
+    9999) hace exactamente eso, con un endpoint extra `POST /mint-token`
+    (atajo de desarrollo documentado, no parte de OAuth) para emitir tokens
+    bajo demanda.
+12. **Las 5 tools ejecutadas de verdad contra el servidor real + el backend
+    real** (checklist "Validación", "al menos un flujo completo por cada
+    tool"), con `fastmcp.Client` apuntando a `http://localhost:8010/mcp` y
+    un token minteado con los 4 scopes:
+    - `query_incident_tool({"incident_id": 1})` → `ok: true`, trae el
+      ticket real recién creado.
+    - `create_incident_ticket_tool(...)` → `ok: true`, crea un ticket
+      nuevo real (`id: 2`) en el backend real.
+    - `update_incident_status_tool({"incident_id": 2, "status":
+      "in_progress"})` → `ok: true`, el `status` cambia de verdad en la
+      base (vía el endpoint de ciclo de vida real).
+    - `query_inventory_tool({"sku": "TEC-EAR-001"})` → `ok: true`, trae el
+      producto real sembrado.
+    - `update_inventory_stock_tool(...)` → `ok: false, error:
+      "read_only_tool"` — el rechazo explícito, confirmado en una corrida
+      real (no solo en el test).
+13. **Migración del agente verificada con una corrida real de `run_agent()`
+    contra el MCP Server real** (no solo con fakes): con
+    `MCP_SERVER_URL`/`MCP_SERVER_TOKEN` apuntando al servidor real,
+    `await agent_graph.run_agent("¿cuál es el estado del ticket 1?", ...)`
+    produjo `node_order = ["receive_question", "classify_intent",
+    "incidents_tool", "generate"]` y una respuesta con los datos reales del
+    ticket; la pregunta de inventario produjo el mismo patrón con
+    `inventory_tool`. `retrieve_fn` se inyectó como una función que lanza
+    `AssertionError` si se llega a llamar — nunca se llamó, confirmando que
+    el enrutamiento eligió la tool y no el RAG, igual que antes de migrar.
+    También se probó `POST /agent/query` de punta a punta con
+    `TestClient` (mismo patrón que toda la sesión) contra el servidor MCP
+    real → `200` con la respuesta correcta.
+14. **Bug de LangGraph verificado antes de asumirlo, no después**: antes de
+    convertir los nodos de tool a `async def`, se armó un grafo mínimo de
+    prueba (dos nodos, uno sync y uno async) y se confirmó con
+    `.ainvoke()`/`.astream()` que LangGraph efectivamente soporta nodos
+    sync y async mezclados en el mismo grafo — evitando migrar
+    innecesariamente los nodos `retrieve`/`generate`/`classify_intent`
+    (que no lo necesitan) solo por precaución.
+15. **Fragilidad preexistente encontrada al correr toda la suite junta**:
+    `pytest test_rag.py test_agent_graph.py` en una invocación falla en la
+    importación de `agent_graph.py` por una colisión de `sys.modules['rag']`
+    entre los dos `rag.py` del repo (`data/process/` vs. `data/pipelines/`)
+    -- preexistente, no introducida por esta migración (no se tocó
+    `pipeline_path.py` ni el import de `rag` en `agent_graph.py`). Cada
+    archivo, corrido en su propia invocación de `pytest` (el patrón que ya
+    usaba todo este repo), sigue en verde -- documentado en
+    `Pasos/rag-knowledge-base-fase1.md`, "Pendiente" #10.
 
 ## Decisiones de implementación no cubiertas por la guía genérica
 
@@ -277,6 +433,33 @@ nunca asumidos por nombre) para no adivinar una API que no existe:
   (firma RS256, coincidencia de issuer, audiencia, scopes) funciona; el
   emisor de prueba con claves RSA reales sí lo hace, sin depender de un
   proveedor externo ni de red.
+- **`mcp_client.py::call_mcp_tool` arma un `ToolCall` (`{"name", "args",
+  "id", "type": "tool_call"}`), no pasa los argumentos planos a
+  `tool.ainvoke()`**: confirmado empíricamente (no asumido) que
+  `tool.ainvoke(args_planos)` devuelve solo el `content` (el JSON
+  serializado como *texto*), mientras que `tool.ainvoke(tool_call)`
+  devuelve un `ToolMessage` cuyo `.artifact["structured_content"]` ya es
+  el dict real -- evita tener que parsear JSON a mano y es exactamente el
+  mismo dict que devolvía la tool HTTP directa que se reemplazó.
+- **`call_mcp_tool` reconstruye el cliente MCP y vuelve a listar las tools
+  en cada llamada, sin cachear una sesión persistente**: mismo trade-off
+  que `httpx.Client()` fresco en cada llamada de la implementación HTTP
+  directa que reemplaza -- listar 5 tools es una llamada MCP liviana
+  (`tools/list`), y mantener una sesión MCP persistente viva a través de
+  llamadas HTTP individuales del agente introduciría gestión de ciclo de
+  vida (cuándo reconectar, cuándo expira el token) que esta entrega no
+  necesita todavía.
+- **`MCP_TIMEOUT_SECONDS` por defecto en 8s, no los 4s que tenía
+  `INCIDENTS_API_TIMEOUT_SECONDS`**: una llamada MCP implica un handshake
+  de protocolo (`tools/list` + `tools/call`, cada uno un JSON-RPC sobre
+  streamable-HTTP) encima del tiempo del backend real -- se mantiene el
+  mismo espíritu (valor concreto y corto, no "razonable") pero ajustado al
+  overhead real del transporte nuevo.
+- **`dev_idp_server.py` vive en `mcps/trackflow-mcp/` (no en
+  `services/knowledge-api/`)**: es el emisor que protege al MCP Server, no
+  una pieza del agente -- el agente solo lo consume indirectamente (el
+  token que usa para llamar al MCP Server debe venir de ese mismo emisor).
+  Vive junto a `auth.py`, que es quien lo consumiría en un chequeo real.
 
 ## Pendiente / siguientes pasos
 
@@ -297,3 +480,45 @@ nunca asumidos por nombre) para no adivinar una API que no existe:
   cumple "registrar en logs", pero no hay un backend de logs centralizado
   configurado en este repo (no hay convención previa de logging estructurado
   a un colector en el resto del monorepo tampoco).
+- **Falta el último paso manual de "Validación": probar en MCP Playground
+  de verdad**. El servidor real (`mcps/trackflow-mcp`, puerto 8010) y su
+  emisor OAuth de desarrollo (`dev_idp_server.py`, puerto 9999) están
+  **corriendo ahora mismo** en este Codespace, contra un `incidents-api`
+  real (Postgres + TinyDB reales, con un ticket real ya creado) -- dejados
+  así a propósito para este paso. Falta:
+  1. Exponer el puerto 8010 como público. Yo no puedo ejecutar este paso
+     (`gh codespace ports visibility 8010:public`) -- un guardrail de este
+     entorno lo bloquea por tratarse de crear un túnel de ingreso externo,
+     y me pidió dejarlo para que decida el desarrollador. Alternativa sin
+     `gh`: en el panel "Ports" de VS Code, click derecho sobre el puerto
+     8010 → "Port Visibility" → "Public".
+  2. La URL pública queda con el patrón
+     `https://$CODESPACE_NAME-8010.app.github.dev/mcp` (en este Codespace:
+     `https://solid-happiness-gx6r7rpv454cp455-8010.app.github.dev/mcp`).
+  3. Generar un token de prueba (el emisor de desarrollo sigue corriendo en
+     `localhost:9999`):
+     ```bash
+     curl -s -X POST http://localhost:9999/mint-token \
+       -H "Content-Type: application/json" \
+       -d '{"scopes": ["mcp:access", "incidents:read", "incidents:write", "inventory:read"], "audience": "trackflow-mcp"}'
+     ```
+     (el campo `access_token` de la respuesta es el Bearer token a pegar).
+  4. En mcpplaygroundonline.com: pegar la URL del paso 2, expandir la
+     sección de auth y pegar el token del paso 3, conectar, y correr
+     `tools/list` + al menos una llamada por tool (ya ejecutadas por mí vía
+     `fastmcp.Client` con resultados reales documentados en "Cómo se
+     verificó" #12 -- este paso es para confirmarlo también desde
+     Playground, como pide el checklist literalmente).
+  5. Limpieza posterior: los contenedores `trackflow-pg-mcp`/
+     `trackflow-redis-mcp` y los procesos `dev_idp_server.py`/`server.py`/
+     `uvicorn main:app` (incidents-api) quedaron corriendo para este paso --
+     una vez validado, `docker rm -f trackflow-pg-mcp trackflow-redis-mcp`
+     y matar esos procesos (no se automatizó el apagado para no cortar la
+     validación a mitad de camino).
+- **El token del agente hacia el MCP Server (`MCP_SERVER_TOKEN`) se generó
+  a mano con el emisor de desarrollo, no vía un flujo OAuth
+  client-credentials real**: documentado como límite explícito en
+  `mcp_client.py` -- en producción, ese token saldría de un flujo
+  client-credentials real contra `MCPAUTH_ISSUER`, renovado
+  periódicamente; no implementado por no haber un proveedor real
+  configurado (mismo límite que el resto del proyecto).

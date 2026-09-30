@@ -5,6 +5,28 @@ Fase 2: `retrieve()` y `generate_answer()` separados de `query()`
 precisamente para que un grafo como este pudiera reutilizarlos como pasos
 independientes, sin ejecutar la recuperación dos veces).
 
+## Migración a MCP (checklist "Migración del agente")
+
+Los nodos `incidents_tool`/`inventory_tool` ya NO llaman directamente a
+`services/incidents-api` por HTTP -- pasan por `mcps/trackflow-mcp` (el MCP
+Server) vía `langchain-mcp-adapters` (`mcp_client.py::call_mcp_tool`). La
+implementación HTTP directa anterior (`tools/incidents_tool.py`,
+`tools/inventory_tool.py`) se **eliminó** (no se dejó deprecada-pero-viva):
+el agente tiene un único camino posible hacia el Incidents Manager, nunca
+dos. El contrato de estos dos nodos no cambió (siguen devolviendo
+`{"ok": ..., "incidents"|"products": [...], "error": ...}` en
+`tool_result`), así que el resto del grafo (enrutamiento, `tool_failed`,
+`_tool_result_to_context_chunks`) no se tocó.
+
+Como las llamadas MCP son async (`langchain_mcp_adapters`), `incidents_tool`
+e `inventory_tool` ahora son nodos `async def` -- LangGraph soporta nodos
+sync y async mezclados en el mismo grafo bajo `.astream()`/`.ainvoke()`
+(verificado con un grafo mínimo de prueba antes de migrar, no asumido).
+`run_agent()` pasó de `compiled_graph.stream(...)` a
+`await compiled_graph.astream(...)`, y `routers/agent.py::query_agent` pasó
+a `async def` -- FastAPI soporta handlers async nativamente, cambio
+mínimo.
+
 ## Estado del grafo
 
 `AgentState` trae lo mínimo que un nodo necesita para decidir el siguiente
@@ -110,8 +132,8 @@ from langgraph.graph.state import CompiledStateGraph
 
 import pipeline_path  # noqa: F401  (efecto secundario: agrega data/pipelines/ a sys.path)
 from rag import generate_answer, retrieve
-from tools.incidents_tool import IncidentQueryInput, extract_incident_query, query_incidents
-from tools.inventory_tool import InventoryQueryInput, extract_inventory_query, query_inventory
+from intent_extraction import extract_incident_query, extract_inventory_query
+from mcp_client import call_mcp_tool
 
 SERVICE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = SERVICE_DIR.parent.parent
@@ -168,24 +190,32 @@ def _make_retrieve_node(retrieve_fn: Callable[[str], list[dict[str, Any]]]) -> C
     return retrieve_node
 
 
+async def _default_incidents_tool_call(args: dict[str, Any]) -> dict[str, Any]:
+    return await call_mcp_tool("query_incident_tool", args)
+
+
+async def _default_inventory_tool_call(args: dict[str, Any]) -> dict[str, Any]:
+    return await call_mcp_tool("query_inventory_tool", args)
+
+
 def _make_incidents_tool_node(
-    incidents_tool_fn: Callable[[IncidentQueryInput], Any],
-) -> Callable[[AgentState], dict[str, Any]]:
-    def incidents_tool_node(state: AgentState) -> dict[str, Any]:
+    incidents_tool_fn: Callable[[dict[str, Any]], Any],
+) -> Callable[[AgentState], Any]:
+    async def incidents_tool_node(state: AgentState) -> dict[str, Any]:
         query = extract_incident_query(state["question"])
-        result = incidents_tool_fn(query)
-        return {"tool_result": result.model_dump()}
+        result = await incidents_tool_fn({"query": query})
+        return {"tool_result": result}
 
     return incidents_tool_node
 
 
 def _make_inventory_tool_node(
-    inventory_tool_fn: Callable[[InventoryQueryInput], Any],
-) -> Callable[[AgentState], dict[str, Any]]:
-    def inventory_tool_node(state: AgentState) -> dict[str, Any]:
+    inventory_tool_fn: Callable[[dict[str, Any]], Any],
+) -> Callable[[AgentState], Any]:
+    async def inventory_tool_node(state: AgentState) -> dict[str, Any]:
         query = extract_inventory_query(state["question"])
-        result = inventory_tool_fn(query)
-        return {"tool_result": result.model_dump()}
+        result = await inventory_tool_fn({"query": query})
+        return {"tool_result": result}
 
     return inventory_tool_node
 
@@ -284,8 +314,8 @@ def build_graph(
     retrieve_fn: Callable[[str], list[dict[str, Any]]] = retrieve,
     generate_fn: Callable[[str, list[dict[str, Any]]], str] = generate_answer,
     classify_fn: Callable[[str], str] = classify_intent,
-    incidents_tool_fn: Callable[[IncidentQueryInput], Any] = query_incidents,
-    inventory_tool_fn: Callable[[InventoryQueryInput], Any] = query_inventory,
+    incidents_tool_fn: Callable[[dict[str, Any]], Any] = _default_incidents_tool_call,
+    inventory_tool_fn: Callable[[dict[str, Any]], Any] = _default_inventory_tool_call,
     checkpointer: Any = None,
 ) -> CompiledStateGraph:
     """Arma y compila el grafo. Todas las funciones de negocio son
@@ -357,18 +387,22 @@ def get_trace(thread_id: str) -> list[dict[str, Any]] | None:
     return json.loads(path.read_text())
 
 
-def run_agent(
+async def run_agent(
     question: str,
     *,
     thread_id: str | None = None,
     retrieve_fn: Callable[[str], list[dict[str, Any]]] = retrieve,
     generate_fn: Callable[[str, list[dict[str, Any]]], str] = generate_answer,
     classify_fn: Callable[[str], str] = classify_intent,
-    incidents_tool_fn: Callable[[IncidentQueryInput], Any] = query_incidents,
-    inventory_tool_fn: Callable[[InventoryQueryInput], Any] = query_inventory,
+    incidents_tool_fn: Callable[[dict[str, Any]], Any] = _default_incidents_tool_call,
+    inventory_tool_fn: Callable[[dict[str, Any]], Any] = _default_inventory_tool_call,
     checkpointer: Any = None,
 ) -> tuple[AgentState, list[dict[str, Any]], str]:
     """Corre el grafo de punta a punta. Devuelve `(estado_final, trace, thread_id)`.
+
+    `async def` porque `incidents_tool`/`inventory_tool` llaman al MCP
+    Server vía `langchain-mcp-adapters` (async) -- ver docstring del módulo,
+    "Migración a MCP".
 
     El trace es la secuencia real `[{"node": ..., "output": ...}, ...]` en
     el orden en que LangGraph ejecutó los nodos (`stream_mode="updates"`),
@@ -389,7 +423,7 @@ def run_agent(
     trace: list[dict[str, Any]] = []
     final_state: dict[str, Any] = {"question": question}
 
-    for update in compiled_graph.stream({"question": question}, config=config, stream_mode="updates"):
+    async for update in compiled_graph.astream({"question": question}, config=config, stream_mode="updates"):
         for node_name, partial_state in update.items():
             trace.append({"node": node_name, "output": partial_state})
             final_state.update(partial_state)

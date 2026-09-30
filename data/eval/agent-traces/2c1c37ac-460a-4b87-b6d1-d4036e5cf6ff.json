@@ -1,0 +1,14 @@
+[
+  {
+    "node": "receive_question",
+    "output": {
+      "question": ""
+    }
+  },
+  {
+    "node": "empty_question",
+    "output": {
+      "error": "La pregunta no puede estar vacía."
+    }
+  }
+]

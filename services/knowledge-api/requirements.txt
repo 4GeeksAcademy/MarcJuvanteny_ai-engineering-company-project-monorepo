@@ -5,4 +5,4 @@ python-dotenv>=1.0.1,<2.0.0
 qdrant-client>=1.13,<1.15
 openai>=1.0.0,<4.0.0
 langgraph>=1.2.12
-httpx>=0.28.1,<1.0.0
+langchain-mcp-adapters>=0.3.2

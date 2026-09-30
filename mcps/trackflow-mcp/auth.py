@@ -46,12 +46,16 @@ es un documento de descubrimiento publico, no un dato de negocio.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
+from dotenv import load_dotenv
 from mcpauth import MCPAuth
 from mcpauth.config import AuthorizationServerMetadata, AuthServerConfig, AuthServerType
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 MCPAUTH_ISSUER = os.environ.get("MCPAUTH_ISSUER", "")
 MCPAUTH_AUDIENCE = os.environ.get("MCPAUTH_AUDIENCE") or None

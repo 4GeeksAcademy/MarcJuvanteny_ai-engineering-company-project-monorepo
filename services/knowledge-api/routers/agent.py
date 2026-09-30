@@ -20,9 +20,9 @@ logger = logging.getLogger("agent")
 
 
 @router.post("/query", response_model=QueryResponse)
-def query_agent(payload: QueryRequest) -> QueryResponse:
+async def query_agent(payload: QueryRequest) -> QueryResponse:
     try:
-        state, _trace, thread_id = run_agent(payload.question)
+        state, _trace, thread_id = await run_agent(payload.question)
     except Exception:
         # Nunca un stack trace crudo al cliente -- el detalle completo va al
         # log del servidor.

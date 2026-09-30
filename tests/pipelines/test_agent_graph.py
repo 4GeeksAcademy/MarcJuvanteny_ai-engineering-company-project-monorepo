@@ -74,14 +74,15 @@ def test_valid_graph_compiles_without_error():
 # --- Eval 1: orden del trace en el camino feliz -----------------------------
 
 
-def test_eval_retrieve_executes_before_generate_in_the_trace():
+@pytest.mark.anyio
+async def test_eval_retrieve_executes_before_generate_in_the_trace():
     """"Para esta pregunta, el nodo retrieve debe ejecutarse antes que
     generate" -- el ejemplo literal de la guía, verificado sobre el trace."""
 
     def fake_retrieve(question: str):
         return [{"source_document": "sla-delivery", "section": "Resumen", "text": "texto de ejemplo"}]
 
-    state, trace, thread_id = agent_graph.run_agent(
+    state, trace, thread_id = await agent_graph.run_agent(
         "¿cuál es el SLA de entrega?", retrieve_fn=fake_retrieve, generate_fn=_echo_generate
     )
 
@@ -98,8 +99,9 @@ def test_eval_retrieve_executes_before_generate_in_the_trace():
 # --- Eval 2: pregunta vacia -> error, sin llamar a retrieve -----------------
 
 
-def test_eval_empty_question_routes_to_error_without_calling_retrieve():
-    state, trace, _thread_id = agent_graph.run_agent(
+@pytest.mark.anyio
+async def test_eval_empty_question_routes_to_error_without_calling_retrieve():
+    state, trace, _thread_id = await agent_graph.run_agent(
         "   ", retrieve_fn=_refuse_to_be_called, generate_fn=_refuse_to_be_called
     )
 
@@ -112,11 +114,12 @@ def test_eval_empty_question_routes_to_error_without_calling_retrieve():
 # --- Eval 3: sin contexto por encima del umbral -> honestidad, sin generar -
 
 
-def test_eval_no_context_routes_to_honest_answer_without_calling_generate():
+@pytest.mark.anyio
+async def test_eval_no_context_routes_to_honest_answer_without_calling_generate():
     def fake_retrieve_nothing(question: str):
         return []
 
-    state, trace, _thread_id = agent_graph.run_agent(
+    state, trace, _thread_id = await agent_graph.run_agent(
         "¿algo totalmente fuera de la base de conocimiento?",
         retrieve_fn=fake_retrieve_nothing,
         generate_fn=_refuse_to_be_called,
@@ -169,7 +172,8 @@ def _lexical_embed_for_corpus() -> tuple[callable, QdrantClient, str]:
     return embed, client, collection
 
 
-def test_eval_answer_stays_anchored_to_the_real_knowledge_base():
+@pytest.mark.anyio
+async def test_eval_answer_stays_anchored_to_the_real_knowledge_base():
     """"Al menos un eval debe verificar que la respuesta sigue anclada en tu
     base de conocimiento existente" -- pregunta de política conocida
     (descuentos de almacenamiento) debe devolver la entidad esperada de
@@ -192,7 +196,7 @@ def test_eval_answer_stays_anchored_to_the_real_knowledge_base():
         return pipeline.retrieve(question, qdrant_client=client, embed_fn=embed, collection_name=collection, min_score=-1.0)
 
     question = "¿puede un account manager ofrecer un descuento de almacenamiento sin aprobación?"
-    state, trace, _thread_id = agent_graph.run_agent(question, retrieve_fn=retrieve_fn, generate_fn=_echo_generate)
+    state, trace, _thread_id = await agent_graph.run_agent(question, retrieve_fn=retrieve_fn, generate_fn=_echo_generate)
 
     assert [step["node"] for step in trace] == ["receive_question", "classify_intent", "retrieve", "generate"]
     assert any("Miguel Torres" in chunk["text"] for chunk in state["context"]), (
@@ -205,29 +209,35 @@ def test_eval_answer_stays_anchored_to_the_real_knowledge_base():
 # --- Enrutamiento: tool vs. RAG (CONTEXT7.md, "Tracing y evaluación") ------
 
 
-def test_eval_ticket_question_resolves_with_tool_not_rag():
-    """"Una pregunta que debe resolverse con una tool (no con el RAG)"."""
-    from tools.incidents_tool import IncidentSummary, IncidentToolOutput
+@pytest.mark.anyio
+async def test_eval_ticket_question_resolves_with_tool_not_rag():
+    """"Una pregunta que debe resolverse con una tool (no con el RAG)".
 
-    def fake_incidents_tool(query):
-        assert query.incident_id == 42
-        return IncidentToolOutput(
-            ok=True,
-            incidents=[
-                IncidentSummary(
-                    id=42,
-                    title="Paquete perdido",
-                    status="open",
-                    category="lost_parcel",
-                    origin="customer",
-                    branch="la_warehouse",
-                    created_at="2026-01-01T00:00:00Z",
-                    updated_at="2026-01-01T00:00:00Z",
-                )
+    `incidents_tool_fn` ahora es `Callable[[dict], Awaitable[dict]]` -- el
+    mismo contrato que `mcp_client.call_mcp_tool` (ver "Migración a MCP" en
+    `agent_graph.py`), un fake async en vez del `IncidentToolOutput`
+    tipado de la implementación HTTP directa ya eliminada."""
+
+    async def fake_incidents_tool(args: dict) -> dict:
+        assert args == {"query": {"incident_id": 42}}
+        return {
+            "ok": True,
+            "incidents": [
+                {
+                    "id": 42,
+                    "title": "Paquete perdido",
+                    "status": "open",
+                    "category": "lost_parcel",
+                    "origin": "customer",
+                    "branch": "la_warehouse",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                }
             ],
-        )
+            "error": None,
+        }
 
-    state, trace, _thread_id = agent_graph.run_agent(
+    state, trace, _thread_id = await agent_graph.run_agent(
         "¿cuál es el estado del ticket 42?",
         incidents_tool_fn=fake_incidents_tool,
         generate_fn=_echo_generate,
@@ -241,13 +251,14 @@ def test_eval_ticket_question_resolves_with_tool_not_rag():
     assert "open" in state["answer"]
 
 
-def test_eval_policy_question_resolves_with_rag_not_tool():
+@pytest.mark.anyio
+async def test_eval_policy_question_resolves_with_rag_not_tool():
     """"Una pregunta que debe resolverse con el RAG (no con una tool)"."""
 
     def fake_retrieve(question: str):
         return [{"source_document": "sla-delivery", "section": "Resumen", "text": "texto de politica"}]
 
-    state, trace, _thread_id = agent_graph.run_agent(
+    state, trace, _thread_id = await agent_graph.run_agent(
         "¿cuál es el SLA de entrega estándar?",
         retrieve_fn=fake_retrieve,
         generate_fn=_echo_generate,
@@ -262,25 +273,24 @@ def test_eval_policy_question_resolves_with_rag_not_tool():
     assert state["answer"] == "texto de politica"
 
 
-def test_eval_incidents_service_unavailable_falls_back_honestly():
-    """(Opcional) Fallback cuando el servicio de incidentes no está
-    disponible: la tool devuelve `ok=False` (simulando un `ConnectError` real
-    de `httpx`, no solo un valor a mano) y el agente responde con honestidad,
-    sin llamar nunca al modelo de generación."""
-    import httpx
+@pytest.mark.anyio
+async def test_eval_incidents_service_unavailable_falls_back_honestly():
+    """(Opcional) Fallback cuando el MCP Server no está disponible: se usa
+    `mcp_client.call_mcp_tool` REAL (no un fake a mano) apuntado a un puerto
+    donde nada escucha -- un `ConnectError` real de verdad, no simulado --
+    y el agente responde con honestidad, sin llamar nunca al modelo de
+    generación."""
+    from mcp_client import build_mcp_client, call_mcp_tool
 
-    from tools.incidents_tool import IncidentQueryInput, query_incidents
+    def unreachable_client_factory():
+        return build_mcp_client(url="http://127.0.0.1:1/mcp", token="", timeout=1.0)
 
-    def unavailable_transport_handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("Connection refused", request=request)
+    async def incidents_tool_against_down_mcp_server(args: dict) -> dict:
+        return await call_mcp_tool("query_incident_tool", args, client_factory=unreachable_client_factory)
 
-    def real_incidents_tool_against_down_backend(query: IncidentQueryInput):
-        with httpx.Client(transport=httpx.MockTransport(unavailable_transport_handler)) as client:
-            return query_incidents(query, client=client)
-
-    state, trace, _thread_id = agent_graph.run_agent(
+    state, trace, _thread_id = await agent_graph.run_agent(
         "¿cuál es el estado del ticket 7?",
-        incidents_tool_fn=real_incidents_tool_against_down_backend,
+        incidents_tool_fn=incidents_tool_against_down_mcp_server,
         generate_fn=_refuse_to_be_called,  # nunca debe inventar un estado llamando al LLM
         retrieve_fn=_refuse_to_be_called,
     )
@@ -295,7 +305,8 @@ def test_eval_incidents_service_unavailable_falls_back_honestly():
 # --- Checkpointing: la corrida queda inspeccionable -------------------------
 
 
-def test_checkpointed_run_is_inspectable_via_state_history():
+@pytest.mark.anyio
+async def test_checkpointed_run_is_inspectable_via_state_history():
     """"Implementa checkpointing en cada transición de estado relevante,
     para que una corrida pueda inspeccionarse o retomarse"."""
     from langgraph.checkpoint.memory import MemorySaver
@@ -309,7 +320,7 @@ def test_checkpointed_run_is_inspectable_via_state_history():
     thread_id = "test-thread-checkpointing"
     config = {"configurable": {"thread_id": thread_id}}
 
-    compiled.invoke({"question": "¿cuál es el SLA de entrega?"}, config=config)
+    await compiled.ainvoke({"question": "¿cuál es el SLA de entrega?"}, config=config)
 
     history = list(compiled.get_state_history(config))
     assert len(history) >= 2  # al menos el estado inicial y el final quedaron como checkpoints separados

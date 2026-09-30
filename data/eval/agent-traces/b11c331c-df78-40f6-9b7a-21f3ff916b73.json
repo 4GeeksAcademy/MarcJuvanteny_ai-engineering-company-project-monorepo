@@ -1,0 +1,41 @@
+[
+  {
+    "node": "receive_question",
+    "output": {
+      "question": "¿cuál es el estado del ticket 42?"
+    }
+  },
+  {
+    "node": "classify_intent",
+    "output": {
+      "route": "incidents_tool"
+    }
+  },
+  {
+    "node": "incidents_tool",
+    "output": {
+      "tool_result": {
+        "ok": true,
+        "incidents": [
+          {
+            "id": 42,
+            "title": "Paquete perdido",
+            "status": "open",
+            "category": "lost_parcel",
+            "origin": "customer",
+            "branch": "la_warehouse",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z"
+          }
+        ],
+        "error": null
+      }
+    }
+  },
+  {
+    "node": "generate",
+    "output": {
+      "answer": "Ticket #42 — Paquete perdido\nEstado: open. Categoría: lost_parcel. Origen: customer. Sede: la_warehouse.\nCreado: 2026-01-01T00:00:00Z. Actualizado: 2026-01-01T00:00:00Z."
+    }
+  }
+]

@@ -69,14 +69,15 @@ services/knowledge-api/    # Fase 3: FastAPI, sibling de incidents-api/reporting
   main.py                  # app + CORS + registra los routers
   pipeline_path.py         # agrega data/pipelines/ a sys.path (mismo patron que services/reporting/)
   routers/knowledge.py     # POST /knowledge/query (Fase 3, RAG)
-  routers/agent.py         # POST /agent/query (grafo del agente) -- convive con el anterior
-  agent_graph.py           # AgentState, nodos, classify_intent, aristas condicionales, build_graph(), run_agent(), get_trace()
-  tools/
-    backend_client.py       # INCIDENTS_API_URL/TOKEN/TIMEOUT compartido (mismo proceso sirve /api/incidents e /inventory/*)
-    incidents_tool.py       # tool obligatoria: query_incidents() -- solo GET, timeout explicito, fallback honesto
-    inventory_tool.py       # tool opcional: query_inventory() -- solo GET, filtra por SKU del lado de la tool
+  routers/agent.py         # POST /agent/query (grafo del agente, async) -- convive con el anterior
+  agent_graph.py           # AgentState, nodos (incidents_tool/inventory_tool async), classify_intent, build_graph(), run_agent() (async), get_trace()
+  mcp_client.py            # cliente MCP hacia mcps/trackflow-mcp (langchain-mcp-adapters) -- reemplaza tools/ (eliminado)
+  intent_extraction.py     # extract_incident_query/extract_inventory_query -- movidas de tools/*.py (eliminado)
   schemas.py                # QueryRequest/QueryResponse (compartidos por ambos routers)
-  pyproject.toml / requirements.txt / Dockerfile / .env.example   # + langgraph, httpx (instalado con `uv add`)
+  pyproject.toml / requirements.txt / Dockerfile / .env.example   # + langgraph, langchain-mcp-adapters (instalado con `uv add`)
+
+mcps/trackflow-mcp/        # MCP Server real -- ver Pasos/mcp-server-tools.md para el detalle completo
+                             # (implementación, OAuth, migración del agente, validación en MCP Playground)
 
 uis/backoffice/
   src/app/(protected)/knowledge/page.tsx    # Fase 4: pagina de consulta
@@ -92,8 +93,7 @@ data/eval/
 
 tests/pipelines/
   test_rag.py               # Fase 5: 17 tests (Fase 1 + Fase 2), Qdrant :memory: + embed_fn/generation_client fake
-  test_agent_graph.py       # Grafo del agente: 10 evals (estructura, 6 rutas incl. tools, anclaje, checkpointing)
-  test_agent_tools.py       # 17 tests de incidents_tool.py/inventory_tool.py via httpx.MockTransport
+  test_agent_graph.py       # Grafo del agente: 10 evals (estructura, 6 rutas incl. tools, anclaje, checkpointing) -- async
 
 docs/rag/
   rag-design.md              # Fase 6: documento de diseño completo (proceso RAG, chunking, embeddings, Recall@3)
@@ -354,7 +354,18 @@ python ../eval/evaluate_retrieval.py   # Recall@3 (embedding lexico local, no ne
   reiniciar el servicio haría falta `SqliteSaver`/`PostgresSaver`
   (`langgraph-checkpoint-*`), no incluido en esta entrega (ver "Pendiente").
 
-## Checklist de la entrega — Tool obligatoria: consulta de tickets de soporte
+> **Migrado a MCP (2026-09-30)**: las dos secciones siguientes documentan la
+> implementación HTTP directa original (`tools/incidents_tool.py`,
+> `tools/inventory_tool.py`). Esa implementación se **eliminó** — el agente
+> ahora llama a las mismas dos tools a través de `mcps/trackflow-mcp` (el MCP
+> Server), vía `mcp_client.py`/`langchain-mcp-adapters`. El contrato de
+> entrada/salida que describen estas secciones sigue siendo el mismo
+> (ahora lo valida el MCP Server, no un modelo Pydantic local) y las
+> garantías (solo lectura, timeout explícito, fallback honesto) se
+> preservaron — ver `Pasos/mcp-server-tools.md`, sección "Migración del
+> agente", para la implementación actual y su verificación.
+
+## Checklist de la entrega — Tool obligatoria: consulta de tickets de soporte (implementación original, migrada)
 
 - [x] **Contrato tipado de entrada/salida**: `IncidentQueryInput`
   (`incident_id` o filtros `status`/`origin`/`branch`/`category`) e
@@ -395,7 +406,7 @@ python ../eval/evaluate_retrieval.py   # Recall@3 (embedding lexico local, no ne
   (<error>). Probá de nuevo en unos minutos."` — nunca un estado
   fabricado.
 
-## Checklist de la entrega — Tool extra (opcional): consulta de inventario
+## Checklist de la entrega — Tool extra (opcional): consulta de inventario (implementación original, migrada)
 
 - [x] **Mismo tipo de contrato tipado**: `InventoryQueryInput` (`sku`
   opcional) / `InventoryToolOutput` (`ok`, `products: list[ProductSummary]`,
@@ -808,3 +819,15 @@ vaciado — ver "Decisiones" sobre por qué no se comitea ese directorio).
    prueba ni el checklist lo pedían; agregarlo sería extender
    `classify_intent`/`_route_after_classify` con la misma estructura que ya
    existe para incidentes.
+10. **Fragilidad preexistente descubierta durante la migración a MCP** (no
+    introducida por ella): `python -m pytest test_rag.py test_agent_graph.py`
+    en una sola invocación falla en la importación de `agent_graph.py`
+    (`ImportError: cannot import name 'generate_answer' from 'rag'`) porque
+    `test_rag.py` deja `sys.modules['rag']` apuntando al `rag.py` de
+    `data/process/` (Fase 1), y `agent_graph.py` espera que `import rag`
+    resuelva al de `data/pipelines/` (Fase 2) vía `pipeline_path.py`. Cada
+    archivo de test **individualmente** sigue en verde
+    (`test_rag.py` 17/17, `test_agent_graph.py` 10/10) — el patrón
+    establecido en este repo de correr cada archivo con su propia invocación
+    de `pytest` ya evitaba este problema sin saberlo; documentado ahora
+    explícitamente para no combinarlos por accidente en CI.
