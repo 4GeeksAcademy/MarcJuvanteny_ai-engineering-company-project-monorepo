@@ -1,7 +1,7 @@
-# RAG de TrackFlow — Fases 1-6 + grafo del agente (LangGraph)
+# RAG de TrackFlow — Fases 1-6 + grafo del agente (LangGraph) + tools
 
 Fecha: 2026-09-24 (Fase 1) — actualizado 2026-09-28 (Fases 2-6) — actualizado
-2026-09-28 (Grafo del agente)
+2026-09-28 (Grafo del agente) — actualizado 2026-09-28 (Tools + enrutamiento)
 
 Implementación completa de `CONTEXT/CONTEXT7.md` (Hito 7 — RAG y Base de
 Conocimiento): setup del entorno, Fase 1 (preparación de datos e indexación,
@@ -9,13 +9,14 @@ Conocimiento): setup del entorno, Fase 1 (preparación de datos e indexación,
 Fase 3 (endpoint HTTP, `services/knowledge-api/`), Fase 4 (UI mínima,
 `uis/backoffice`), Fase 5 (pruebas unitarias, `tests/pipelines/test_rag.py`),
 Fase 5b (eval de retrieval / Recall@3, `data/eval/evaluate_retrieval.py`),
-Fase 6 (documento de diseño, `docs/rag/rag-design.md`) y el **grafo del
+Fase 6 (documento de diseño, `docs/rag/rag-design.md`), el **grafo del
 agente** (LangGraph, `services/knowledge-api/agent_graph.py`) — el "proyecto
-posterior" que las Fases 1-6 dejaron marcado como pendiente, ya
-implementado: envuelve `retrieve()`/`generate_answer()` (Fase 2, sin
-duplicarlos) en un grafo con enrutamiento condicional, checkpointing, trace
-consultable, evals, y un endpoint nuevo (`POST /agent/query`) que convive
-con `POST /knowledge/query`.
+posterior" que las Fases 1-6 dejaron marcado como pendiente — y, sobre ese
+grafo, **tools + enrutamiento**: una tool obligatoria de consulta de tickets
+(`tools/incidents_tool.py`), una tool opcional de inventario
+(`tools/inventory_tool.py`), un nodo de clasificación de intención
+(`classify_intent`) que decide RAG/tool/ambos sin que el usuario lo indique,
+y 3 evals nuevos de enrutamiento sobre el trace existente.
 
 Antes de leer este documento, leí (por instrucción de AGENTS.md al inicio de
 sesión) `memory-bank/projectbrief.md`, `techContext.md` y `progress.md`, y
@@ -69,9 +70,13 @@ services/knowledge-api/    # Fase 3: FastAPI, sibling de incidents-api/reporting
   pipeline_path.py         # agrega data/pipelines/ a sys.path (mismo patron que services/reporting/)
   routers/knowledge.py     # POST /knowledge/query (Fase 3, RAG)
   routers/agent.py         # POST /agent/query (grafo del agente) -- convive con el anterior
-  agent_graph.py           # AgentState, nodos, aristas condicionales, build_graph(), run_agent(), get_trace()
+  agent_graph.py           # AgentState, nodos, classify_intent, aristas condicionales, build_graph(), run_agent(), get_trace()
+  tools/
+    backend_client.py       # INCIDENTS_API_URL/TOKEN/TIMEOUT compartido (mismo proceso sirve /api/incidents e /inventory/*)
+    incidents_tool.py       # tool obligatoria: query_incidents() -- solo GET, timeout explicito, fallback honesto
+    inventory_tool.py       # tool opcional: query_inventory() -- solo GET, filtra por SKU del lado de la tool
   schemas.py                # QueryRequest/QueryResponse (compartidos por ambos routers)
-  pyproject.toml / requirements.txt / Dockerfile / .env.example   # + langgraph (instalado con `uv add`)
+  pyproject.toml / requirements.txt / Dockerfile / .env.example   # + langgraph, httpx (instalado con `uv add`)
 
 uis/backoffice/
   src/app/(protected)/knowledge/page.tsx    # Fase 4: pagina de consulta
@@ -87,7 +92,8 @@ data/eval/
 
 tests/pipelines/
   test_rag.py               # Fase 5: 17 tests (Fase 1 + Fase 2), Qdrant :memory: + embed_fn/generation_client fake
-  test_agent_graph.py       # Grafo del agente: 7 evals (estructura, 3 rutas, anclaje, checkpointing)
+  test_agent_graph.py       # Grafo del agente: 10 evals (estructura, 6 rutas incl. tools, anclaje, checkpointing)
+  test_agent_tools.py       # 17 tests de incidents_tool.py/inventory_tool.py via httpx.MockTransport
 
 docs/rag/
   rag-design.md              # Fase 6: documento de diseño completo (proceso RAG, chunking, embeddings, Recall@3)
@@ -348,6 +354,88 @@ python ../eval/evaluate_retrieval.py   # Recall@3 (embedding lexico local, no ne
   reiniciar el servicio haría falta `SqliteSaver`/`PostgresSaver`
   (`langgraph-checkpoint-*`), no incluido en esta entrega (ver "Pendiente").
 
+## Checklist de la entrega — Tool obligatoria: consulta de tickets de soporte
+
+- [x] **Contrato tipado de entrada/salida**: `IncidentQueryInput`
+  (`incident_id` o filtros `status`/`origin`/`branch`/`category`) e
+  `IncidentToolOutput` (`ok`, `incidents: list[IncidentSummary]`, `error`) —
+  `IncidentSummary` expone los mismos campos que `IncidentRecord` en
+  `services/incidents-api/models.py` (leído el archivo real antes de
+  escribir el schema, no adivinado).
+- [x] **Lee del gestor de incidentes real por HTTP, nunca datos
+  simulados**: `query_incidents()` llama a
+  `GET {INCIDENTS_API_URL}/api/incidents/{id}` o
+  `GET {INCIDENTS_API_URL}/api/incidents` (con filtros) — HTTP, no
+  en-proceso, porque `incidents-api` y `knowledge-api` son paquetes/procesos
+  separados en este monorepo (cada uno con su propio `.venv`/deploy); "en
+  proceso" no era una opción real de arquitectura acá, no una preferencia.
+- [x] **Credenciales backend-a-backend desde entorno, nunca hardcodeadas**:
+  `tools/backend_client.py::INCIDENTS_API_TOKEN` (leído de `.env`,
+  `Authorization: Bearer` solo si está seteado). `GET /api/incidents*`
+  requiere JWT en el backend real (`Depends(get_current_user)`, verificado
+  leyendo `services/incidents-api/main.py`).
+- [x] **Solo lectura**: `incidents_tool.py` no importa ni define ninguna
+  función que haga `POST`/`PATCH`/`DELETE` sobre incidentes — verificado
+  explícitamente en `test_incidents_tool_module_has_no_write_capability`
+  (lee el código fuente del módulo, falla si aparece alguno de esos verbos).
+- [x] **Nodo condicional en el grafo**: `classify_intent` (ver más abajo,
+  "Enrutamiento del agente") decide cuándo usar esta tool en vez de/además
+  del RAG.
+- [x] **Timeout explícito y numérico**: `DEFAULT_TIMEOUT_SECONDS = 4`
+  (`backend_client.py`, configurable por `.env`) — valor concreto elegido
+  porque son consultas de solo lectura sobre TinyDB, típicamente responden
+  en milisegundos; 4s es margen generoso para un backend sano y corto para
+  no colgar el grafo si está caído.
+- [x] **Fallback honesto ante timeout/falla/ticket inexistente**: la tool
+  nunca lanza una excepción sin manejar ni inventa un estado —
+  `httpx.TimeoutException` → `error="timeout"`, `httpx.RequestError` →
+  `error="connection_error:..."`, `404` → `error="not_found"`. El grafo
+  (`_route_after_incidents_tool`/`_tool_failed_node`) traduce cualquier
+  `ok=False` en `"No pude confirmar esa información en este momento
+  (<error>). Probá de nuevo en unos minutos."` — nunca un estado
+  fabricado.
+
+## Checklist de la entrega — Tool extra (opcional): consulta de inventario
+
+- [x] **Mismo tipo de contrato tipado**: `InventoryQueryInput` (`sku`
+  opcional) / `InventoryToolOutput` (`ok`, `products: list[ProductSummary]`,
+  `error`) — implementada porque TrackFlow sí tiene un gestor de inventario
+  construido (`services/incidents-api/routers/inventory.py`,
+  `GET /inventory/products`).
+- [x] **Mismas reglas que la tool obligatoria**: timeout explícito (mismo
+  `DEFAULT_TIMEOUT_SECONDS`, mismo `backend_client.py` compartido — es el
+  mismo proceso backend el que sirve ambos paths), fallback ante fallo, sin
+  datos simulados. `GET /inventory/products` no acepta filtro por SKU del
+  lado del servidor (devuelve el catálogo completo) — el filtrado por SKU
+  mencionado en la pregunta se hace sobre la respuesta real, documentado en
+  el docstring del módulo para que no se confunda con un límite del
+  backend.
+
+## Checklist de la entrega — Enrutamiento del agente
+
+- [x] **El agente decide automáticamente RAG/tool/ambos, sin que el usuario
+  lo indique**: `classify_intent(question)` (heurística por palabras clave,
+  determinista y documentada — sin LLM real de enrutamiento, no hay
+  credenciales de 4Geeks en este repo) devuelve `"rag"`, `"incidents_tool"`,
+  `"inventory_tool"` o `"both"` según qué términos aparecen en la pregunta
+  (tickets/incidencias → tool de incidentes; stock/inventario → tool de
+  inventario; si además aparecen términos de política/SLA/descuento junto
+  con términos de incidentes → `"both"`, RAG + tool). El nodo
+  `_route_after_classify` despacha a `retrieve`/`incidents_tool`/`inventory_tool`
+  según ese valor — nunca un parámetro que el usuario tenga que pasar.
+- [x] **Ninguna tool hace más de una cosa**: `incidents_tool.py` e
+  `inventory_tool.py` son dos módulos y dos funciones (`query_incidents`,
+  `query_inventory`) separadas, cada una con su propio contrato — no hay una
+  tool genérica de "buscar" que decida internamente qué backend golpear.
+- [x] **Camino combinado (RAG + tool) sin explosión combinatoria de casos
+  especiales**: cuando `route == "both"`, el grafo pasa por
+  `incidents_tool → retrieve → generate` — `generate` recibe
+  `tool_chunks + context` (una lista fusionada) y llama a
+  `generate_answer(question, context)` **sin cambiar su firma de Fase 2** —
+  el resultado de una tool se traduce a "chunks" de contexto
+  (`_tool_result_to_context_chunks`) en vez de crear una función de
+  generación paralela.
+
 ## Checklist de la entrega — Tracing y evaluación
 
 - [x] **Cada corrida produce un trace consultable, no solo impreso en
@@ -360,9 +448,17 @@ python ../eval/evaluate_retrieval.py   # Recall@3 (embedding lexico local, no ne
   LangSmith en este repo) — el log estructurado propio cumple el mismo
   requisito ("lo que importa es que el trace sea consultable después de la
   corrida").
+- [x] **El trace muestra con claridad si se usó RAG, una tool, o ambos, y en
+  qué orden**: `classify_intent` se ejecuta siempre después de
+  `receive_question` (salvo pregunta vacía) y su salida (`state["route"]`)
+  queda en el trace; para `route="both"` el `node_order` real es
+  `["receive_question", "classify_intent", "incidents_tool", "retrieve",
+  "generate"]` — el orden exacto (tool antes que RAG) es observable, no
+  solo el resultado final.
 - [x] **Al menos 3 evals con criterio verificable sobre la respuesta o el
-  trace**: 4 (3 de enrutamiento + 1 de anclaje, ver más abajo), más 2 tests
-  de estructura del grafo y 1 de checkpointing — 7 tests en total en
+  trace**: 7 (3 de enrutamiento RAG-only + 1 de anclaje + 3 nuevos de
+  enrutamiento tool/RAG/fallback, ver abajo), más 2 tests de estructura del
+  grafo y 1 de checkpointing — 10 tests en total en
   `tests/pipelines/test_agent_graph.py`:
   1. **Orden del trace** (el ejemplo literal de la guía): para una pregunta
      con contexto, `retrieve` se ejecuta antes que `generate`
@@ -372,6 +468,22 @@ python ../eval/evaluate_retrieval.py   # Recall@3 (embedding lexico local, no ne
   3. **Sin contexto por encima del umbral**: enruta a `no_context` sin
      llamar nunca a `generate`
      (`test_eval_no_context_routes_to_honest_answer_without_calling_generate`).
+  4. **Pregunta resuelta con una tool, no con el RAG** (nuevo, obligatorio):
+     `test_eval_ticket_question_resolves_with_tool_not_rag` — pregunta sobre
+     un ticket puntual, `retrieve_fn=_refuse_to_be_called` (levanta
+     `AssertionError` si LangGraph llegara a invocarlo); el `node_order`
+     real confirma que `retrieve` nunca aparece.
+  5. **Pregunta resuelta con el RAG, no con una tool** (nuevo, obligatorio):
+     `test_eval_policy_question_resolves_with_rag_not_tool` — pregunta de
+     SLA, `incidents_tool_fn=inventory_tool_fn=_refuse_to_be_called`;
+     confirma que ninguna tool aparece en el trace.
+  6. **Fallback cuando el servicio de incidentes no está disponible**
+     (nuevo, opcional): `test_eval_incidents_service_unavailable_falls_back_honestly`
+     — usa la función `query_incidents` real (no un fake a mano) contra un
+     `httpx.Client(transport=httpx.MockTransport(...))` que simula un
+     `httpx.ConnectError` real; verifica que el grafo llega a `tool_failed`
+     con un mensaje honesto y que `generate_fn` (que inventaría una
+     respuesta) nunca se llama.
 - [x] **Los evals corren contra el trace de una corrida offline, no contra
   un servicio en vivo repetido**: cada eval invoca `run_agent()` **una vez**
   con `retrieve_fn`/`generate_fn` inyectados (fakes deterministas, sin red)
@@ -392,10 +504,17 @@ python ../eval/evaluate_retrieval.py   # Recall@3 (embedding lexico local, no ne
   anclaje se rompiera (p. ej. alguien cambia el chunking y ese chunk deja de
   indexarse), este eval fallaría aunque el enrutamiento del grafo siguiera
   siendo perfecto.
-- [x] **Los evals viven en `tests/pipelines/` y no rompen los tests RAG
-  existentes**: `test_agent_graph.py` (7 tests) es un archivo nuevo,
-  `test_rag.py` (17 tests) no se tocó — ambos corren independientes, ambos
-  siguen en verde.
+- [x] **Los evals viven en `tests/pipelines/` y no rompen los tests
+  existentes**: `test_agent_graph.py` pasó de 7 a 10 tests (3 nuevos de
+  enrutamiento tool/RAG/fallback, más la inserción de `classify_intent` en
+  el `node_order` esperado de los tests previos — 3 aserciones ajustadas,
+  ninguna lógica de test cambiada), `test_agent_tools.py` es un archivo
+  nuevo (17 tests: extracción de intención + llamadas reales via
+  `httpx.MockTransport` + verificación de solo-lectura, para las dos
+  tools), `test_rag.py` (17 tests) no se tocó — los tres archivos corren
+  independientes, los tres en verde
+  (`python -m pytest tests/pipelines/test_agent_graph.py tests/pipelines/test_agent_tools.py -q`
+  → `27 passed`).
 
 ## Checklist de la entrega — Endpoint (`services/`)
 
@@ -505,6 +624,33 @@ infraestructura real donde fue posible y funciones/clientes falsos donde no:
      `POST /knowledge/query`): `200` con la respuesta del grafo, `400` con
      pregunta vacía y el mensaje exacto del nodo `empty_question`.
 
+8. **Tools + enrutamiento** — verificado en capas:
+   - `incidents_tool.py`/`inventory_tool.py` probados primero a mano
+     (`python3 -c "..."`) contra `httpx.MockTransport` (éxito, timeout,
+     conexión rechazada, 404, 401) antes de escribir los tests formales.
+   - El grafo extendido (con `classify_intent` y los 2 nodos de tool)
+     probado a mano en sus 3 escenarios nuevos (solo-tool éxito, solo-tool
+     falla, camino combinado `both`) con fakes que lanzan `AssertionError`
+     si se llama la función "equivocada" (`retrieve`/`generate` fuera de
+     turno) — confirmó los `node_order` exactos antes de escribirlos en los
+     tests.
+   - **Bug real encontrado y corregido en el propio test**: el primer eval
+     de "pregunta con filtro de estado" usaba la palabra "abiertas" en la
+     pregunta de prueba, pero `_STATUS_KEYWORDS` en `incidents_tool.py`
+     solo reconoce "abiertos"/"abierto" (no "abiertas") — el test fallaba
+     porque su propia entrada no coincidía con las keywords documentadas de
+     la tool, no porque la tool tuviera un bug. Corregido el texto de la
+     pregunta de prueba (no la lógica de la tool, que ya estaba
+     documentada y era correcta).
+   - `POST /agent/query` re-verificado con `TestClient` end-to-end con
+     enrutamiento a tool: pregunta sobre un ticket puntual → `incidents_tool`
+     (fake) → `generate` (fake) → `200` con la respuesta esperada,
+     confirmando que el router extendido (`routers/agent.py`) sigue
+     funcionando sin cambios propios (toda la lógica nueva vive en
+     `agent_graph.py`/`tools/`).
+   - `tests/pipelines/test_agent_graph.py` (10 tests) +
+     `tests/pipelines/test_agent_tools.py` (17 tests): `27 passed`.
+
 Toda la infraestructura de prueba (contenedores Docker, `.env` locales,
 servidores de desarrollo) se descartó al terminar
 (`docker rm -f`/`docker ps -a` vacío, `.env`/`.env.local` borrados,
@@ -584,6 +730,29 @@ vaciado — ver "Decisiones" sobre por qué no se comitea ese directorio).
   confirmación explícita del desarrollador — se optó por no comitear el
   directorio (limpiado a mano tras verificar) en vez de tocar `.gitignore`
   sin permiso.
+- **`classify_intent` con keywords, no un LLM real de enrutamiento**: no hay
+  credenciales de 4Geeks en este repo para un clasificador de intención real
+  — la heurística (listas de keywords por dominio: incidentes, inventario,
+  política/SLA) está documentada explícitamente como stand-in, igual que el
+  embedding léxico de Fase 5b, con la limitación honesta de que no entiende
+  sinónimos/paráfrasis fuera de esas listas (ver "Pendiente").
+  `_route_after_classify` solo tiene 4 salidas posibles (`rag`,
+  `incidents_tool`, `inventory_tool`, `both`) — no intenta adivinar
+  combinaciones con inventario (`inventory + rag`) porque el checklist no
+  las pide y hacerlo sin datos de prueba reales sería puro reordenamiento
+  especulativo de condicionales.
+- **Un solo `backend_client.py` compartido por ambas tools**: `/api/incidents`
+  e `/inventory/products` son servidos por el mismo proceso
+  (`services/incidents-api/main.py`, con `routers/inventory.py` registrado
+  ahí) — confirmado leyendo el código antes de decidir, no asumido por el
+  nombre de la carpeta. Una sola `INCIDENTS_API_URL`/timeout/token evita
+  duplicar config para dos tools que en realidad apuntan al mismo backend.
+- **`inventory_tool.py` sin auth propia en las llamadas, pero manda el
+  token igual**: `GET /inventory/products` no requiere JWT en el backend
+  real (`routers/inventory.py`, sin `Depends(get_current_inventory_user)`
+  en las rutas GET) — se manda `Authorization` de todas formas por
+  consistencia con `incidents_tool.py`, es inofensivo cuando no hace falta
+  y evita una rama de código distinta entre las dos tools.
 - **Eval de anclaje con `retrieve()` real, no completamente fake**: los
   otros 3 evals de enrutamiento sí usan `retrieve_fn` fake (no necesitan
   datos reales, solo verifican qué nodo se ejecuta), pero el eval de
@@ -628,3 +797,14 @@ vaciado — ver "Decisiones" sobre por qué no se comitea ese directorio).
    si se sigue generando tráfico real, conviene agregarlo ahí en vez de
    descartar los archivos a mano cada vez; requiere confirmación explícita
    del desarrollador por la restricción de `AGENTS.md` sobre ese archivo.
+8. `classify_intent` es una heurística de keywords, no un clasificador real
+   — una pregunta que combine intención de tool con vocabulario fuera de
+   las listas documentadas (`_INCIDENT_KEYWORDS`/`_INVENTORY_KEYWORDS`/
+   `_POLICY_KEYWORDS`) puede enrutar mal. Con credenciales reales de 4Geeks,
+   reemplazar por una llamada real de clasificación (mismo lugar de
+   integración que `EMBEDDING_API_*`/`GENERATION_API_*`).
+9. El camino combinado (`route="both"`) solo cubre incidentes + política —
+   no existe un caso `inventory + rag` todavía porque ninguna pregunta de
+   prueba ni el checklist lo pedían; agregarlo sería extender
+   `classify_intent`/`_route_after_classify` con la misma estructura que ya
+   existe para incidentes.
