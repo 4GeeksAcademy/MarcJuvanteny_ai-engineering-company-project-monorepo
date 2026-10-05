@@ -89,10 +89,12 @@ async def test_eval_retrieve_executes_before_generate_in_the_trace():
     node_order = [step["node"] for step in trace]
     assert node_order == [
         "receive_question",
+        "input_guard",
         "classify_intent",
         "retrieve_memory",
         "retrieve",
         "generate",
+        "output_guard",
         "propose_memory",
     ]
     assert node_order.index("retrieve") < node_order.index("generate")
@@ -113,7 +115,7 @@ async def test_eval_empty_question_routes_to_error_without_calling_retrieve():
     )
 
     node_order = [step["node"] for step in trace]
-    assert node_order == ["receive_question", "empty_question"]
+    assert node_order == ["receive_question", "input_guard", "empty_question"]
     assert state["error"] == agent_graph.EMPTY_QUESTION_ERROR
     assert "answer" not in state or state.get("answer") is None
 
@@ -135,10 +137,12 @@ async def test_eval_no_context_routes_to_honest_answer_without_calling_generate(
     node_order = [step["node"] for step in trace]
     assert node_order == [
         "receive_question",
+        "input_guard",
         "classify_intent",
         "retrieve_memory",
         "retrieve",
         "no_context",
+        "output_guard",
         "propose_memory",
     ]
     assert state["answer"] == agent_graph.NO_CONTEXT_ANSWER
@@ -214,10 +218,12 @@ async def test_eval_answer_stays_anchored_to_the_real_knowledge_base():
 
     assert [step["node"] for step in trace] == [
         "receive_question",
+        "input_guard",
         "classify_intent",
         "retrieve_memory",
         "retrieve",
         "generate",
+        "output_guard",
         "propose_memory",
     ]
     assert any("Miguel Torres" in chunk["text"] for chunk in state["context"]), (
@@ -268,10 +274,12 @@ async def test_eval_ticket_question_resolves_with_tool_not_rag():
     node_order = [step["node"] for step in trace]
     assert node_order == [
         "receive_question",
+        "input_guard",
         "classify_intent",
         "retrieve_memory",
         "incidents_tool",
         "generate",
+        "output_guard",
         "propose_memory",
     ]
     assert "retrieve" not in node_order
@@ -297,10 +305,12 @@ async def test_eval_policy_question_resolves_with_rag_not_tool():
     node_order = [step["node"] for step in trace]
     assert node_order == [
         "receive_question",
+        "input_guard",
         "classify_intent",
         "retrieve_memory",
         "retrieve",
         "generate",
+        "output_guard",
         "propose_memory",
     ]
     assert "incidents_tool" not in node_order and "inventory_tool" not in node_order
@@ -331,7 +341,14 @@ async def test_eval_incidents_service_unavailable_falls_back_honestly():
     )
 
     node_order = [step["node"] for step in trace]
-    assert node_order == ["receive_question", "classify_intent", "retrieve_memory", "incidents_tool", "tool_failed"]
+    assert node_order == [
+        "receive_question",
+        "input_guard",
+        "classify_intent",
+        "retrieve_memory",
+        "incidents_tool",
+        "tool_failed",
+    ]
     assert state["tool_result"]["ok"] is False
     assert "connection_error" in state["tool_result"]["error"]
     assert "No pude confirmar" in state["answer"]  # honesto, no inventa un estado

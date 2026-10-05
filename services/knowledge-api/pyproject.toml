@@ -30,6 +30,8 @@ py-modules = [
     "memory_proposal",
     "memory_decision",
     "memory_audit",
+    "guardrails",
+    "guardrail_audit",
 ]
 packages = ["routers"]
 

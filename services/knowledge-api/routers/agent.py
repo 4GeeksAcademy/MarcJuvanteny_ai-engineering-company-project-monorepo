@@ -6,19 +6,25 @@ no lo reemplaza. Capa HTTP fina: solo invoca al grafo compilado
 ni generación ni enrutamiento viven acá, eso es responsabilidad del grafo).
 
 `payload.thread_id` se reenvía a `run_agent()` y se devuelve siempre en la
-respuesta (Hito 8, memoria): es lo que le permite a un cliente retomar la
-conversación en el turno siguiente para resolver una propuesta de memoria
-pendiente -- ver `schemas.py::AgentQueryResponse`.
+respuesta (Hito 8 Parte 1, memoria): es lo que le permite a un cliente
+retomar la conversación en el turno siguiente para resolver una propuesta
+de memoria pendiente -- ver `schemas.py::AgentQueryResponse`.
+
+`GET /agent/guardrails/summary` (Hito 8 Parte 2, "Observabilidad mínima"):
+expone cuántas veces se activó cada guardrail durante la sesión de pruebas
+actual (contadores de proceso, ver `guardrail_audit.py`).
 """
 
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 from schemas import AgentQueryResponse, QueryRequest
 
 from agent_graph import run_agent
+from guardrail_audit import get_summary
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 logger = logging.getLogger("agent")
@@ -27,7 +33,9 @@ logger = logging.getLogger("agent")
 @router.post("/query", response_model=AgentQueryResponse)
 async def query_agent(payload: QueryRequest) -> AgentQueryResponse:
     try:
-        state, _trace, thread_id = await run_agent(payload.question, thread_id=payload.thread_id)
+        state, _trace, thread_id = await run_agent(
+            payload.question, thread_id=payload.thread_id, authorized_order_ids=payload.authorized_order_ids
+        )
     except Exception:
         # Nunca un stack trace crudo al cliente -- el detalle completo va al
         # log del servidor.
@@ -41,5 +49,14 @@ async def query_agent(payload: QueryRequest) -> AgentQueryResponse:
         # fallo del sistema, es una respuesta explicita del enrutamiento.
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=state["error"])
 
-    logger.info("agent thread_id=%s -- trace consultable en data/eval/agent-traces/%s.json", thread_id, thread_id)
+    if state.get("guardrail_blocked"):
+        logger.info("agent thread_id=%s -- bloqueada por un guardrail", thread_id)
+    else:
+        logger.info("agent thread_id=%s -- trace consultable en data/eval/agent-traces/%s.json", thread_id, thread_id)
+
     return AgentQueryResponse(answer=state.get("answer") or "", thread_id=thread_id)
+
+
+@router.get("/guardrails/summary")
+async def guardrails_summary() -> dict[str, Any]:
+    return get_summary()

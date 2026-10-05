@@ -64,6 +64,40 @@ Dos nodos nuevos, nunca una segunda llamada al modelo ni un agente aparte:
 momento del grafo en el que se pueda crear una propuesta nueva mientras
 otra sigue sin resolver.
 
+## Harness y guardrails (`CONTEXT/CONTEXT8.2.md`, Hito 8 Parte 2)
+
+Asegura este MISMO agente -- no hay un agente paralelo para este sprint
+(`CONTEXT8.2.md`, Sección 1: "mantén esa identidad"). Dos nodos nuevos, más
+una sanitización dentro de `generate`, implementados en `guardrails.py`:
+
+- `input_guard`: corre primero de todos, antes incluso de
+  `resolve_pending_memory_proposal` -- la seguridad tiene prioridad sobre
+  la memoria. Revisa (en orden) intento de cambio de instrucciones, uso
+  personal no relacionado, mezcla de políticas entre países, y
+  autorización de sesión sobre el número de pedido mencionado. El primero
+  que dispara **bloquea** (`guardrail_blocked=True`, `answer` pasa a ser
+  el mensaje del guardrail, el grafo corta a `END` sin llegar a
+  `retrieve`/tools/`generate`). Si ninguno bloquea pero la pregunta es
+  casual/general, guarda un sufijo de redirección
+  (`guardrail_redirect_suffix`) para anexar a la respuesta real más
+  adelante -- una pregunta casual SIGUE respondida, nunca bloqueada.
+- `generate` (extendido): sanitiza con `sanitize_external_content()` los
+  chunks de tool/RAG/memoria ANTES de pasarlos a `generate_fn` -- ningún
+  texto externo puede tratarse como instrucción, ni siquiera si contiene
+  frases con forma de instrucción (defensa en profundidad, además del
+  aislamiento estructural ya dado por `_build_prompt()`, que pone ese
+  contenido en el mensaje de rol `user`, nunca en el `system`).
+- `output_guard`: corre después de `generate`/`no_context`. Valida la
+  salida (`validate_output()` -- formato, fuga del system prompt, datos
+  sensibles del CONTEXT) y, si hace falta, reemplaza la respuesta por un
+  mensaje seguro. También anexa `guardrail_redirect_suffix` si
+  `input_guard` lo dejó pendiente.
+
+El `AGENT_SYSTEM_PROMPT` real (separación explícita instrucciones/input,
+dominio declarado, qué nunca revelar) vive en `guardrails.py` -- inyectado
+en `generate_answer()` de `data/pipelines/rag.py` vía su nuevo parámetro
+`system_prompt`, sin duplicar esa función.
+
 ## Estado del grafo
 
 `AgentState` trae lo mínimo que un nodo necesita para decidir el siguiente
@@ -123,10 +157,12 @@ día que haya credenciales.
 ## Aristas condicionales (no una secuencia fija)
 
 ```
-START -> receive_question
-receive_question -> [vacía]                        -> empty_question -> END
-                  -> [hay pending_memory_proposal]  -> resolve_pending_memory_proposal -> classify_intent
-                  -> [con contenido, sin pendiente] -> classify_intent
+START -> receive_question -> input_guard
+
+input_guard -> [vacía]                        -> empty_question -> END
+            -> [bloqueada por un guardrail]   -> guardrail_blocked -> END
+            -> [hay pending_memory_proposal]  -> resolve_pending_memory_proposal -> classify_intent
+            -> [con contenido, sin pendiente] -> classify_intent
 
 classify_intent -> retrieve_memory
 
@@ -142,8 +178,10 @@ incidents_tool -> [route="both"]          -> retrieve
 inventory_tool -> [tool ok] -> generate
                -> [tool falló] -> tool_failed -> END
 
-retrieve -> [sin contexto RAG Y sin tool ok] -> no_context -> propose_memory -> END
-         -> [hay contexto RAG o tool ok]     -> generate -> propose_memory -> END
+retrieve -> [sin contexto RAG Y sin tool ok] -> no_context -> output_guard
+         -> [hay contexto RAG o tool ok]     -> generate -> output_guard
+
+output_guard -> propose_memory -> END
 ```
 
 ## Checkpointing
@@ -188,6 +226,18 @@ from intent_extraction import extract_incident_query, extract_inventory_query
 from mcp_client import call_mcp_tool
 from memory_decision import MemoryDecision, classify_memory_decision
 from memory_proposal import MemoryProposal, evaluate_for_memory_proposal, extract_carrier, extract_country
+from guardrail_audit import record_guardrail_event
+from guardrails import (
+    AGENT_SYSTEM_PROMPT,
+    GuardrailResult,
+    check_casual_question,
+    check_country_policy_mixing,
+    check_instruction_override,
+    check_personal_use_request,
+    check_unauthorized_tracking_request,
+    sanitize_external_content,
+    validate_output,
+)
 
 SERVICE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = SERVICE_DIR.parent.parent
@@ -225,6 +275,10 @@ class AgentState(TypedDict, total=False):
     error: str | None
     pending_memory_proposal: dict[str, Any] | None
     memory_decision_record: dict[str, Any] | None
+    # Hito 8 Parte 2 (CONTEXT8.2.md, harness y guardrails):
+    authorized_order_ids: list[str] | None  # pedidos que la sesion actual puede consultar (ver guardrails.py)
+    guardrail_blocked: bool | None
+    guardrail_redirect_suffix: str | None
 
 
 def classify_intent(question: str) -> str:
@@ -245,6 +299,60 @@ def classify_intent(question: str) -> str:
 
 def _receive_question_node(state: AgentState) -> dict[str, Any]:
     return {"question": (state.get("question") or "").strip()}
+
+
+def _record_guardrail(result: GuardrailResult, state: AgentState, audit_fn: Callable[..., None]) -> None:
+    audit_fn(
+        guardrail_name=result.guardrail_name,
+        category=result.category,
+        action=result.action,
+        question=state["question"],
+        thread_id=state.get("thread_id", ""),
+    )
+
+
+def _make_input_guard_node(
+    audit_fn: Callable[..., None] = record_guardrail_event,
+) -> Callable[[AgentState], dict[str, Any]]:
+    """`CONTEXT8.2.md`: corre primero de todos (incluso antes de
+    `resolve_pending_memory_proposal` -- la seguridad tiene prioridad
+    sobre la memoria). Ver "Harness y guardrails" en el docstring del
+    módulo para el orden de chequeos y por qué una pregunta casual se
+    redirige en vez de bloquearse."""
+
+    def input_guard_node(state: AgentState) -> dict[str, Any]:
+        question = state["question"]
+        if not question:
+            return {}
+
+        for check_fn in (check_instruction_override, check_personal_use_request, check_country_policy_mixing):
+            result = check_fn(question)
+            if result is not None:
+                _record_guardrail(result, state, audit_fn)
+                return {"guardrail_blocked": True, "answer": result.message}
+
+        auth_result = check_unauthorized_tracking_request(question, state.get("authorized_order_ids"))
+        if auth_result is not None:
+            _record_guardrail(auth_result, state, audit_fn)
+            return {"guardrail_blocked": True, "answer": auth_result.message}
+
+        casual_result = check_casual_question(question)
+        if casual_result is not None:
+            _record_guardrail(casual_result, state, audit_fn)
+            return {"guardrail_redirect_suffix": casual_result.message}
+
+        return {}
+
+    return input_guard_node
+
+
+def _guardrail_blocked_node(state: AgentState) -> dict[str, Any]:
+    """Nodo terminal sin lógica propia -- `input_guard` ya dejó `answer`
+    listo. Existe como paso separado solo para que el trace muestre con
+    claridad que la corrida terminó acá por un guardrail, no por una
+    respuesta generada."""
+
+    return {}
 
 
 def _default_write_memory(key: str, category: str, fact: str, source_thread_id: str) -> None:
@@ -272,7 +380,7 @@ def _make_resolve_pending_memory_proposal_node(
 ) -> Callable[[AgentState], dict[str, Any]]:
     """`CONTEXT8.md`, "Confirmación del Usuario y Registro Auditable" --
     corre solo cuando `pending_memory_proposal` sobrevivió del turno
-    anterior (ver `_route_after_receive_question`). Escribe a memoria SOLO
+    anterior (ver `_route_after_input_guard`). Escribe a memoria SOLO
     si la decisión es `"approved"`/`"edited"`; registra la decisión en
     auditoría SIEMPRE, sin importar el resultado."""
 
@@ -438,14 +546,53 @@ def _tool_result_to_context_chunks(tool_result: dict[str, Any] | None) -> list[d
 
 def _make_generate_node(
     generate_fn: Callable[[str, list[dict[str, Any]]], str],
+    sanitize_fn: Callable[[list[dict[str, Any]]], tuple[list[dict[str, Any]], bool]] = sanitize_external_content,
+    audit_fn: Callable[..., None] = record_guardrail_event,
 ) -> Callable[[AgentState], dict[str, Any]]:
     def generate_node(state: AgentState) -> dict[str, Any]:
         context = list(state.get("context") or [])
         memory_context = list(state.get("memory_context") or [])
         tool_chunks = _tool_result_to_context_chunks(state.get("tool_result"))
-        return {"answer": generate_fn(state["question"], tool_chunks + memory_context + context)}
+
+        all_chunks = tool_chunks + memory_context + context
+        sanitized_chunks, flagged = sanitize_fn(all_chunks)
+        if flagged:
+            audit_fn(
+                guardrail_name="external_content_sanitized",
+                category="security",
+                action="redirect",
+                question=state["question"],
+                thread_id=state.get("thread_id", ""),
+            )
+
+        return {"answer": generate_fn(state["question"], sanitized_chunks)}
 
     return generate_node
+
+
+def _make_output_guard_node(
+    validate_fn: Callable[[str], GuardrailResult | None] = validate_output,
+    audit_fn: Callable[..., None] = record_guardrail_event,
+) -> Callable[[AgentState], dict[str, Any]]:
+    """Corre después de `generate`/`no_context` -- valida la respuesta
+    (formato, fuga del system prompt, datos sensibles) y anexa el sufijo
+    de redirección que `input_guard` haya dejado pendiente (pregunta
+    casual/general, `CONTEXT8.2.md` Sección 2)."""
+
+    def output_guard_node(state: AgentState) -> dict[str, Any]:
+        answer = state.get("answer") or ""
+        result = validate_fn(answer)
+        if result is not None:
+            _record_guardrail(result, state, audit_fn)
+            return {"answer": result.message}
+
+        suffix = state.get("guardrail_redirect_suffix")
+        if suffix:
+            return {"answer": answer + suffix}
+
+        return {}
+
+    return output_guard_node
 
 
 def _no_context_node(state: AgentState) -> dict[str, Any]:
@@ -481,9 +628,11 @@ def _make_propose_memory_node(
     return propose_memory_node
 
 
-def _route_after_receive_question(state: AgentState) -> str:
+def _route_after_input_guard(state: AgentState) -> str:
     if not state["question"]:
         return "empty_question"
+    if state.get("guardrail_blocked"):
+        return "guardrail_blocked"
     if state.get("pending_memory_proposal"):
         return "resolve_pending_memory_proposal"
     return "classify_intent"
@@ -513,9 +662,18 @@ def _route_after_retrieve(state: AgentState) -> str:
     return "no_context" if (not context and not memory_context and not tool_ok) else "generate"
 
 
+def _default_generate_with_agent_prompt(question: str, context: list[dict[str, Any]]) -> str:
+    """Default de `generate_fn` -- inyecta `AGENT_SYSTEM_PROMPT`
+    (`guardrails.py`, Hito 8 Parte 2) en vez del `SYSTEM_PROMPT` genérico
+    de `data/pipelines/rag.py` (ese es para `POST /knowledge/query`, una
+    herramienta distinta con su propia audiencia)."""
+
+    return generate_answer(question, context, system_prompt=AGENT_SYSTEM_PROMPT)
+
+
 def build_graph(
     retrieve_fn: Callable[[str], list[dict[str, Any]]] = retrieve,
-    generate_fn: Callable[[str, list[dict[str, Any]]], str] = generate_answer,
+    generate_fn: Callable[[str, list[dict[str, Any]]], str] = _default_generate_with_agent_prompt,
     classify_fn: Callable[[str], str] = classify_intent,
     incidents_tool_fn: Callable[[dict[str, Any]], Any] = _default_incidents_tool_call,
     inventory_tool_fn: Callable[[dict[str, Any]], Any] = _default_inventory_tool_call,
@@ -524,13 +682,18 @@ def build_graph(
     decide_memory_fn: Callable[[str], MemoryDecision] = classify_memory_decision,
     write_memory_fn: Callable[[str, str, str, str], None] = _default_write_memory,
     audit_memory_fn: Callable[..., None] = _default_record_memory_decision,
+    sanitize_external_content_fn: Callable[[list[dict[str, Any]]], tuple[list[dict[str, Any]], bool]] = sanitize_external_content,
+    validate_output_fn: Callable[[str], GuardrailResult | None] = validate_output,
+    guardrail_audit_fn: Callable[..., None] = record_guardrail_event,
     checkpointer: Any = None,
 ) -> CompiledStateGraph:
     """Arma y compila el grafo. Todas las funciones de negocio son
     inyectables para poder probar el enrutamiento y el contrato de nodos
     sin credenciales reales de Qdrant/4Geeks ni un backend HTTP en vivo
-    (ver `tests/pipelines/test_agent_graph.py`), y sin Redis real para la
-    memoria (ver `tests/pipelines/test_agent_memory.py`).
+    (ver `tests/pipelines/test_agent_graph.py`), sin Redis real para la
+    memoria (ver `tests/pipelines/test_agent_memory.py`), y sin tocar los
+    archivos reales de auditoría de guardrails (ver
+    `tests/pipelines/test_agent_guardrails.py`).
 
     `.compile()` valida la estructura del grafo y lanza una excepción clara
     si algo está mal -- no se envuelve en un try/except que la esconda.
@@ -538,6 +701,8 @@ def build_graph(
     graph = StateGraph(AgentState)
 
     graph.add_node("receive_question", _receive_question_node)
+    graph.add_node("input_guard", _make_input_guard_node(guardrail_audit_fn))
+    graph.add_node("guardrail_blocked", _guardrail_blocked_node)
     graph.add_node(
         "resolve_pending_memory_proposal",
         _make_resolve_pending_memory_proposal_node(decide_memory_fn, write_memory_fn, audit_memory_fn),
@@ -547,18 +712,21 @@ def build_graph(
     graph.add_node("retrieve", _make_retrieve_node(retrieve_fn))
     graph.add_node("incidents_tool", _make_incidents_tool_node(incidents_tool_fn))
     graph.add_node("inventory_tool", _make_inventory_tool_node(inventory_tool_fn))
-    graph.add_node("generate", _make_generate_node(generate_fn))
+    graph.add_node("generate", _make_generate_node(generate_fn, sanitize_external_content_fn, guardrail_audit_fn))
     graph.add_node("no_context", _no_context_node)
     graph.add_node("empty_question", _empty_question_node)
     graph.add_node("tool_failed", _tool_failed_node)
+    graph.add_node("output_guard", _make_output_guard_node(validate_output_fn, guardrail_audit_fn))
     graph.add_node("propose_memory", _make_propose_memory_node(evaluate_memory_fn))
 
     graph.add_edge(START, "receive_question")
+    graph.add_edge("receive_question", "input_guard")
     graph.add_conditional_edges(
-        "receive_question",
-        _route_after_receive_question,
+        "input_guard",
+        _route_after_input_guard,
         {
             "empty_question": "empty_question",
+            "guardrail_blocked": "guardrail_blocked",
             "resolve_pending_memory_proposal": "resolve_pending_memory_proposal",
             "classify_intent": "classify_intent",
         },
@@ -585,9 +753,11 @@ def build_graph(
         _route_after_retrieve,
         {"no_context": "no_context", "generate": "generate"},
     )
-    graph.add_edge("generate", "propose_memory")
-    graph.add_edge("no_context", "propose_memory")
+    graph.add_edge("generate", "output_guard")
+    graph.add_edge("no_context", "output_guard")
+    graph.add_edge("output_guard", "propose_memory")
     graph.add_edge("propose_memory", END)
+    graph.add_edge("guardrail_blocked", END)
     graph.add_edge("empty_question", END)
     graph.add_edge("tool_failed", END)
 
@@ -613,8 +783,9 @@ async def run_agent(
     question: str,
     *,
     thread_id: str | None = None,
+    authorized_order_ids: list[str] | None = None,
     retrieve_fn: Callable[[str], list[dict[str, Any]]] = retrieve,
-    generate_fn: Callable[[str, list[dict[str, Any]]], str] = generate_answer,
+    generate_fn: Callable[[str, list[dict[str, Any]]], str] = _default_generate_with_agent_prompt,
     classify_fn: Callable[[str], str] = classify_intent,
     incidents_tool_fn: Callable[[dict[str, Any]], Any] = _default_incidents_tool_call,
     inventory_tool_fn: Callable[[dict[str, Any]], Any] = _default_inventory_tool_call,
@@ -623,6 +794,9 @@ async def run_agent(
     decide_memory_fn: Callable[[str], MemoryDecision] = classify_memory_decision,
     write_memory_fn: Callable[[str, str, str, str], None] = _default_write_memory,
     audit_memory_fn: Callable[..., None] = _default_record_memory_decision,
+    sanitize_external_content_fn: Callable[[list[dict[str, Any]]], tuple[list[dict[str, Any]], bool]] = sanitize_external_content,
+    validate_output_fn: Callable[[str], GuardrailResult | None] = validate_output,
+    guardrail_audit_fn: Callable[..., None] = record_guardrail_event,
     checkpointer: Any = None,
 ) -> tuple[AgentState, list[dict[str, Any]], str]:
     """Corre el grafo de punta a punta. Devuelve `(estado_final, trace, thread_id)`.
@@ -635,6 +809,13 @@ async def run_agent(
     solo sobrevive al turno siguiente si el caller reutiliza el MISMO
     `thread_id` -- ver `_DEFAULT_CHECKPOINTER`, compartido entre llamadas
     para que esto funcione a través de requests HTTP separados.
+
+    `authorized_order_ids` (Hito 8 Parte 2): los números de pedido/tracking
+    que la sesión que llama puede consultar legítimamente -- ver
+    `guardrails.py::check_unauthorized_tracking_request` y
+    `Pasos/agent-guardrails.md`, "Decisiones", sobre el límite real de no
+    tener un sistema de autenticación de sesión conectado a este endpoint
+    todavía (`None` desactiva este guardrail en vez de bloquear todo).
 
     El trace es la secuencia real `[{"node": ..., "output": ...}, ...]` en
     el orden en que LangGraph ejecutó los nodos (`stream_mode="updates"`),
@@ -652,6 +833,9 @@ async def run_agent(
         decide_memory_fn=decide_memory_fn,
         write_memory_fn=write_memory_fn,
         audit_memory_fn=audit_memory_fn,
+        sanitize_external_content_fn=sanitize_external_content_fn,
+        validate_output_fn=validate_output_fn,
+        guardrail_audit_fn=guardrail_audit_fn,
         checkpointer=checkpointer or _DEFAULT_CHECKPOINTER,
     )
     thread_id = thread_id or str(uuid.uuid4())
@@ -661,7 +845,9 @@ async def run_agent(
     final_state: dict[str, Any] = {"question": question, "thread_id": thread_id}
 
     async for update in compiled_graph.astream(
-        {"question": question, "thread_id": thread_id}, config=config, stream_mode="updates"
+        {"question": question, "thread_id": thread_id, "authorized_order_ids": authorized_order_ids},
+        config=config,
+        stream_mode="updates",
     ):
         for node_name, partial_state in update.items():
             # LangGraph representa un nodo que no cambio nada del estado

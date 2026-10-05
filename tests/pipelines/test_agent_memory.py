@@ -346,7 +346,7 @@ async def test_pending_proposal_survives_to_the_next_turn_and_gets_approved():
     )
 
     node_order2 = [step["node"] for step in trace2]
-    assert node_order2[0:2] == ["receive_question", "resolve_pending_memory_proposal"]
+    assert node_order2[0:3] == ["receive_question", "input_guard", "resolve_pending_memory_proposal"]
     assert turn2_state["pending_memory_proposal"] is None  # resuelta, y "Si, guardalo" no genera una nueva
     assert len(recorded_writes) == 1
     assert recorded_writes[0][0] == "SEUR:Spain"  # key

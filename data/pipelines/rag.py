@@ -142,10 +142,22 @@ def _build_prompt(question: str, context: list[dict[str, Any]]) -> str:
     return f"Contexto recuperado:\n\n{context_block}\n\nPregunta del cliente: {question}"
 
 
-def generate_answer(question: str, context: list[dict[str, Any]], generation_client: Any = None) -> str:
+def generate_answer(
+    question: str,
+    context: list[dict[str, Any]],
+    generation_client: Any = None,
+    system_prompt: str | None = None,
+) -> str:
     """Arma el prompt con el contexto recuperado y llama al LLM de
     GENERACIÓN (chat/completion — nunca el de embeddings). Paso separado de
-    `retrieve()` a propósito, ver el docstring del módulo."""
+    `retrieve()` a propósito, ver el docstring del módulo.
+
+    `system_prompt`: si se omite, usa el `SYSTEM_PROMPT` de este módulo
+    (la herramienta interna de Fase 3, `POST /knowledge/query`). El agente
+    de `services/knowledge-api/agent_graph.py` (Hito 8 Parte 2,
+    `CONTEXT8.2.md`) inyecta el suyo propio
+    (`guardrails.py::AGENT_SYSTEM_PROMPT`) en vez de duplicar esta función
+    -- misma función, system prompt distinto según quién la llama."""
     from openai import OpenAI
 
     client = generation_client or OpenAI(
@@ -155,7 +167,7 @@ def generate_answer(question: str, context: list[dict[str, Any]], generation_cli
     response = client.chat.completions.create(
         model=GENERATION_MODEL,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
             {"role": "user", "content": _build_prompt(question, context)},
         ],
     )
