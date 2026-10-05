@@ -27,6 +27,43 @@ sync y async mezclados en el mismo grafo bajo `.astream()`/`.ainvoke()`
 a `async def` -- FastAPI soporta handlers async nativamente, cambio
 mínimo.
 
+## Memoria y auto-mejora (checklist "Memoria y Auto-mejora de Agentes",
+## `CONTEXT/CONTEXT8.md`)
+
+Dos nodos nuevos, nunca una segunda llamada al modelo ni un agente aparte:
+
+- `retrieve_memory`: corre siempre después de `classify_intent`, antes de
+  cualquier ruta (RAG/tool/ambos). Si la pregunta menciona un carrier
+  conocido, busca en `memory_store` (Redis, namespace `agent_memory:*` --
+  NUNCA las colecciones RAG de Qdrant) una entrada ya aprobada para
+  `carrier:país` y la agrega como contexto extra para `generate`. Lado de
+  LECTURA de la interfaz explícita que pide el checklist.
+- `propose_memory`: corre después de `generate`/`no_context` (no después de
+  `tool_failed` -- un fallo de red no enseña nada nuevo que recordar).
+  Evalúa la interacción (`memory_proposal.py::evaluate_for_memory_proposal`,
+  heurística determinista, mismo stand-in documentado que `classify_intent`)
+  y, si hay algo memorable, lo agrega como pregunta al final de la MISMA
+  respuesta (`state["answer"]`) y guarda la propuesta en
+  `state["pending_memory_proposal"]` -- nunca escribe a memoria en este
+  paso.
+- `resolve_pending_memory_proposal`: corre al principio del turno
+  SIGUIENTE, solo si `receive_question` detecta un
+  `pending_memory_proposal` que sobrevivió del turno anterior (vía el
+  checkpointer compartido -- ver `_DEFAULT_CHECKPOINTER` más abajo).
+  Clasifica la respuesta del usuario
+  (`memory_decision.py::classify_memory_decision` -- aprobado/rechazado/
+  editado, nunca un `"sí" in mensaje`), escribe a `memory_store` SOLO si
+  fue aprobada o editada, y registra la decisión en
+  `memory_audit.py` sin importar el resultado. Siempre continúa hacia
+  `classify_intent` después -- el mismo mensaje puede resolver la
+  propuesta Y traer una pregunta nueva.
+
+"Una sola propuesta pendiente a la vez" queda garantizado por construcción:
+`propose_memory` solo se alcanza después de que `resolve_pending_memory_proposal`
+(si corrió este turno) ya limpió `pending_memory_proposal` -- nunca hay un
+momento del grafo en el que se pueda crear una propuesta nueva mientras
+otra sigue sin resolver.
+
 ## Estado del grafo
 
 `AgentState` trae lo mínimo que un nodo necesita para decidir el siguiente
@@ -45,27 +82,33 @@ anteriores en el estado.
   `classify_intent()` más abajo.
 - `retrieve`: llama a `retrieve()` de `data/pipelines/rag.py` **sin
   duplicarlo**.
-- `incidents_tool` / `inventory_tool`: cada una llama a **una sola** tool de
-  `tools/` — nunca una tool que "busca tickets o inventario según el caso".
-  Ambas son de solo lectura (`GET`), con timeout explícito
-  (`tools/backend_client.py::DEFAULT_TIMEOUT_SECONDS`) y devuelven un
-  resultado tipado con `ok: bool` — nunca lanzan la excepción cruda del
-  HTTP hacia el grafo.
+- `incidents_tool` / `inventory_tool`: cada una llama a **una sola** tool
+  del MCP Server (ver "Migración a MCP" más abajo) — nunca una tool que
+  "busca tickets o inventario según el caso". Ambas son de solo lectura,
+  con timeout explícito (`mcp_client.py::MCP_TIMEOUT_SECONDS`) y devuelven
+  un resultado tipado con `ok: bool` — nunca lanzan la excepción cruda
+  hacia el grafo.
 - `tool_failed`: la tool agotó el timeout, falló, o el ticket/SKU no existe
   — responde con honestidad ("no pude confirmar...") **sin** llamar al
   modelo de generación, para que un fallo de red nunca se disfrace de un
-  estado inventado.
+  estado inventado. **Nunca** pasa por `propose_memory` después: un fallo
+  no enseña nada nuevo que recordar.
+- `retrieve_memory`: lado de LECTURA de la memoria (ver "Memoria y
+  auto-mejora" más abajo) — corre siempre, para toda ruta.
 - `generate`: llama a `generate_answer(question, context)` — **no** a
   `query()` — con el contexto RAG **y/o** el resultado de una tool exitosa
-  (convertido a chunks de contexto por `_tool_result_to_context_chunks()`,
-  mismo formato que un chunk de Qdrant, para no tener que cambiar la firma
-  de `generate_answer()`). Meter `query()` en este nodo volvería a ejecutar
+  (convertido a chunks de contexto por `_tool_result_to_context_chunks()`)
+  **y/o** memoria aprobada relevante (`memory_context`), mismo formato que
+  un chunk de Qdrant en los tres casos, para no tener que cambiar la firma
+  de `generate_answer()`. Meter `query()` en este nodo volvería a ejecutar
   la recuperación y colapsaría el grafo a la secuencia monolítica que la
   guía pide evitar.
 - `no_context`: responde con honestidad, sin llamar al LLM, cuando ni el RAG
   ni una tool trajeron nada.
 - `empty_question`: la pregunta llegó vacía — nunca se llama a `retrieve()`
   ni a una tool con una query vacía.
+- `propose_memory` / `resolve_pending_memory_proposal`: ver "Memoria y
+  auto-mejora" más abajo.
 
 ## Enrutamiento (`classify_intent`)
 
@@ -81,10 +124,13 @@ día que haya credenciales.
 
 ```
 START -> receive_question
-receive_question -> [vacía] -> empty_question -> END
-                  -> [con contenido] -> classify_intent
+receive_question -> [vacía]                        -> empty_question -> END
+                  -> [hay pending_memory_proposal]  -> resolve_pending_memory_proposal -> classify_intent
+                  -> [con contenido, sin pendiente] -> classify_intent
 
-classify_intent -> [route="rag"]             -> retrieve
+classify_intent -> retrieve_memory
+
+retrieve_memory -> [route="rag"]             -> retrieve
                  -> [route="incidents_tool"] -> incidents_tool
                  -> [route="inventory_tool"] -> inventory_tool
                  -> [route="both"]           -> incidents_tool (y luego retrieve)
@@ -96,18 +142,24 @@ incidents_tool -> [route="both"]          -> retrieve
 inventory_tool -> [tool ok] -> generate
                -> [tool falló] -> tool_failed -> END
 
-retrieve -> [sin contexto RAG Y sin tool ok] -> no_context -> END
-         -> [hay contexto RAG o tool ok]     -> generate -> END
+retrieve -> [sin contexto RAG Y sin tool ok] -> no_context -> propose_memory -> END
+         -> [hay contexto RAG o tool ok]     -> generate -> propose_memory -> END
 ```
 
 ## Checkpointing
 
-`build_graph()` compila con un `checkpointer` (por defecto `MemorySaver`,
-en memoria del proceso — no persiste entre reinicios; para eso hace falta
+`build_graph()` compila con un `checkpointer` (por defecto
+`_DEFAULT_CHECKPOINTER`, un único `MemorySaver` a nivel de módulo
+compartido entre corridas -- ver el comentario junto a su definición más
+abajo sobre el bug real que esto corrigió: antes, cada `run_agent()` sin
+`checkpointer` explícito creaba un `MemorySaver` nuevo, y nada sobrevivía
+entre dos requests HTTP separados con el mismo `thread_id`. Sigue sin
+persistir entre reinicios del proceso -- para eso hace falta
 `SqliteSaver`/`PostgresSaver` de `langgraph-checkpoint-*`, no incluido en
 esta entrega, ver `Pasos/`). Cada nodo ejecutado queda como un checkpoint
 bajo el mismo `thread_id` — `compiled_graph.get_state_history(config)`
-permite inspeccionar o retomar una corrida existente.
+permite inspeccionar o retomar una corrida existente, y es el mecanismo que
+hace posible que `pending_memory_proposal` sobreviva al turno siguiente.
 
 ## Trace
 
@@ -134,10 +186,25 @@ import pipeline_path  # noqa: F401  (efecto secundario: agrega data/pipelines/ a
 from rag import generate_answer, retrieve
 from intent_extraction import extract_incident_query, extract_inventory_query
 from mcp_client import call_mcp_tool
+from memory_decision import MemoryDecision, classify_memory_decision
+from memory_proposal import MemoryProposal, evaluate_for_memory_proposal, extract_carrier, extract_country
 
 SERVICE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = SERVICE_DIR.parent.parent
 TRACE_DIR = ROOT_DIR / "data" / "eval" / "agent-traces"
+
+# Checkpointer compartido a nivel de módulo -- ver "Bug real encontrado"
+# en Pasos/agent-memory.md: antes de esto, cada llamada a `run_agent()` sin
+# un `checkpointer` explícito pasaba `None` a `build_graph()`, que creaba
+# un `MemorySaver()` NUEVO en cada corrida (`checkpointer or MemorySaver()`)
+# -- nada sobrevivía entre dos requests HTTP separados a `POST /agent/query`
+# con el mismo `thread_id`, aunque el docstring de Hito 7 ya afirmaba
+# soporte de checkpointing "para que una corrida pueda... retomarse". Con
+# memoria (Hito 8: una propuesta pendiente debe sobrevivir al turno
+# siguiente, que en producción es OTRA request HTTP) esto se vuelve
+# load-bearing, no cosmético. Los tests que necesitan estado aislado siguen
+# pudiendo pasar su propio `MemorySaver()` fresco explícito.
+_DEFAULT_CHECKPOINTER = MemorySaver()
 
 NO_CONTEXT_ANSWER = "No tengo información sobre eso en la base de conocimiento de TrackFlow."
 EMPTY_QUESTION_ERROR = "La pregunta no puede estar vacía."
@@ -149,11 +216,15 @@ _POLICY_KEYWORDS = ("política", "politica", "sla", "devolución", "devolucion",
 
 class AgentState(TypedDict, total=False):
     question: str
+    thread_id: str
     route: str | None
     context: list[dict[str, Any]] | None
+    memory_context: list[dict[str, Any]] | None
     tool_result: dict[str, Any] | None
     answer: str | None
     error: str | None
+    pending_memory_proposal: dict[str, Any] | None
+    memory_decision_record: dict[str, Any] | None
 
 
 def classify_intent(question: str) -> str:
@@ -176,11 +247,112 @@ def _receive_question_node(state: AgentState) -> dict[str, Any]:
     return {"question": (state.get("question") or "").strip()}
 
 
+def _default_write_memory(key: str, category: str, fact: str, source_thread_id: str) -> None:
+    from memory_store import make_entry, write_memory
+
+    write_memory(make_entry(key, category, fact, source_thread_id=source_thread_id))
+
+
+def _default_read_memory(key: str):
+    from memory_store import read_memory
+
+    return read_memory(key)
+
+
+def _default_record_memory_decision(**kwargs: Any) -> None:
+    from memory_audit import record_memory_decision
+
+    record_memory_decision(**kwargs)
+
+
+def _make_resolve_pending_memory_proposal_node(
+    decide_fn: Callable[[str], MemoryDecision] = classify_memory_decision,
+    write_fn: Callable[[str, str, str, str], None] = _default_write_memory,
+    audit_fn: Callable[..., None] = _default_record_memory_decision,
+) -> Callable[[AgentState], dict[str, Any]]:
+    """`CONTEXT8.md`, "Confirmación del Usuario y Registro Auditable" --
+    corre solo cuando `pending_memory_proposal` sobrevivió del turno
+    anterior (ver `_route_after_receive_question`). Escribe a memoria SOLO
+    si la decisión es `"approved"`/`"edited"`; registra la decisión en
+    auditoría SIEMPRE, sin importar el resultado."""
+
+    def resolve_node(state: AgentState) -> dict[str, Any]:
+        proposal = state.get("pending_memory_proposal") or {}
+        message = state["question"]
+        decision = decide_fn(message)
+        audit_outcome = decision.outcome
+
+        if decision.outcome in ("approved", "edited"):
+            fact = decision.edited_fact if decision.outcome == "edited" else proposal.get("fact", "")
+            try:
+                write_fn(proposal.get("key", ""), proposal.get("category", ""), fact, state.get("thread_id", ""))
+            except Exception as exc:
+                # Nunca reportar "approved" en la auditoria si el write de
+                # verdad fallo (Redis caido) -- el registro debe ser honesto.
+                audit_outcome = f"{decision.outcome}_write_failed:{exc}"
+
+        audit_fn(
+            thread_id=state.get("thread_id", ""),
+            proposal=proposal,
+            outcome=audit_outcome,
+            triggering_message=message,
+            edited_fact=decision.edited_fact,
+        )
+
+        return {
+            "pending_memory_proposal": None,
+            "memory_decision_record": {"outcome": audit_outcome, "proposal": proposal},
+        }
+
+    return resolve_node
+
+
 def _make_classify_node(classify_fn: Callable[[str], str]) -> Callable[[AgentState], dict[str, Any]]:
     def classify_node(state: AgentState) -> dict[str, Any]:
         return {"route": classify_fn(state["question"])}
 
     return classify_node
+
+
+def _memory_chunk(fact: str, key: str) -> dict[str, Any]:
+    return {"source_document": "agent-memory", "section": key, "text": fact}
+
+
+def _make_retrieve_memory_node(
+    read_fn: Callable[[str], Any] = _default_read_memory,
+) -> Callable[[AgentState], dict[str, Any]]:
+    """Lado de LECTURA de la interfaz explícita de memoria (`CONTEXT8.md`).
+    Corre siempre, para toda ruta -- si la pregunta menciona un carrier
+    conocido y hay una entrada aprobada para `carrier:país`, se agrega como
+    contexto extra para `generate` (nunca se inyecta memoria directo al
+    system prompt sin pasar por esta interfaz).
+
+    Igual que las tools del MCP Server: un fallo leyendo memoria (Redis
+    caído, timeout) nunca debe tumbar el turno completo -- se degrada a
+    "sin memoria para esta pregunta" en vez de propagar la excepción cruda
+    (que haría fallar hasta una pregunta de RAG que de pura casualidad
+    menciona el nombre de un carrier)."""
+
+    def retrieve_memory_node(state: AgentState) -> dict[str, Any]:
+        question = state["question"]
+        carrier = extract_carrier(question)
+        if carrier is None:
+            return {"memory_context": []}
+
+        country = extract_country(question, carrier=carrier)
+        try:
+            entry = read_fn(f"{carrier}:{country}")
+        except Exception:
+            return {"memory_context": []}
+
+        if entry is None:
+            return {"memory_context": []}
+
+        fact = entry.fact if hasattr(entry, "fact") else entry["fact"]
+        key = entry.key if hasattr(entry, "key") else entry["key"]
+        return {"memory_context": [_memory_chunk(fact, key)]}
+
+    return retrieve_memory_node
 
 
 def _make_retrieve_node(retrieve_fn: Callable[[str], list[dict[str, Any]]]) -> Callable[[AgentState], dict[str, Any]]:
@@ -269,8 +441,9 @@ def _make_generate_node(
 ) -> Callable[[AgentState], dict[str, Any]]:
     def generate_node(state: AgentState) -> dict[str, Any]:
         context = list(state.get("context") or [])
+        memory_context = list(state.get("memory_context") or [])
         tool_chunks = _tool_result_to_context_chunks(state.get("tool_result"))
-        return {"answer": generate_fn(state["question"], tool_chunks + context)}
+        return {"answer": generate_fn(state["question"], tool_chunks + memory_context + context)}
 
     return generate_node
 
@@ -283,8 +456,37 @@ def _empty_question_node(state: AgentState) -> dict[str, Any]:
     return {"error": EMPTY_QUESTION_ERROR}
 
 
+def _make_propose_memory_node(
+    evaluate_fn: Callable[[str, str], MemoryProposal | None] = evaluate_for_memory_proposal,
+) -> Callable[[AgentState], dict[str, Any]]:
+    """`CONTEXT8.md`, "Auto-evaluación y Propuesta de Memoria" -- corre
+    después de `generate`/`no_context` (nunca después de `tool_failed`: un
+    fallo de red no enseña nada nuevo). Nunca escribe a memoria acá --
+    guarda la propuesta en `pending_memory_proposal` (el checkpointer la
+    hace sobrevivir al turno siguiente) y se la propone al usuario dentro
+    de la misma respuesta."""
+
+    def propose_memory_node(state: AgentState) -> dict[str, Any]:
+        proposal = evaluate_fn(state["question"], state.get("answer") or "")
+        if proposal is None:
+            return {}
+
+        answer = state.get("answer") or ""
+        question_for_user = f"\n\n¿Querés que recuerde esto para la próxima? {proposal.reason}"
+        return {
+            "pending_memory_proposal": proposal.model_dump(),
+            "answer": answer + question_for_user,
+        }
+
+    return propose_memory_node
+
+
 def _route_after_receive_question(state: AgentState) -> str:
-    return "empty_question" if not state["question"] else "classify_intent"
+    if not state["question"]:
+        return "empty_question"
+    if state.get("pending_memory_proposal"):
+        return "resolve_pending_memory_proposal"
+    return "classify_intent"
 
 
 def _route_after_classify(state: AgentState) -> str:
@@ -305,9 +507,10 @@ def _route_after_inventory_tool(state: AgentState) -> str:
 
 def _route_after_retrieve(state: AgentState) -> str:
     context = state.get("context") or []
+    memory_context = state.get("memory_context") or []
     tool_result = state.get("tool_result")
     tool_ok = bool(tool_result and tool_result.get("ok"))
-    return "no_context" if (not context and not tool_ok) else "generate"
+    return "no_context" if (not context and not memory_context and not tool_ok) else "generate"
 
 
 def build_graph(
@@ -316,12 +519,18 @@ def build_graph(
     classify_fn: Callable[[str], str] = classify_intent,
     incidents_tool_fn: Callable[[dict[str, Any]], Any] = _default_incidents_tool_call,
     inventory_tool_fn: Callable[[dict[str, Any]], Any] = _default_inventory_tool_call,
+    read_memory_fn: Callable[[str], Any] = _default_read_memory,
+    evaluate_memory_fn: Callable[[str, str], MemoryProposal | None] = evaluate_for_memory_proposal,
+    decide_memory_fn: Callable[[str], MemoryDecision] = classify_memory_decision,
+    write_memory_fn: Callable[[str, str, str, str], None] = _default_write_memory,
+    audit_memory_fn: Callable[..., None] = _default_record_memory_decision,
     checkpointer: Any = None,
 ) -> CompiledStateGraph:
     """Arma y compila el grafo. Todas las funciones de negocio son
     inyectables para poder probar el enrutamiento y el contrato de nodos
     sin credenciales reales de Qdrant/4Geeks ni un backend HTTP en vivo
-    (ver `tests/pipelines/test_agent_graph.py`).
+    (ver `tests/pipelines/test_agent_graph.py`), y sin Redis real para la
+    memoria (ver `tests/pipelines/test_agent_memory.py`).
 
     `.compile()` valida la estructura del grafo y lanza una excepción clara
     si algo está mal -- no se envuelve en un try/except que la esconda.
@@ -329,7 +538,12 @@ def build_graph(
     graph = StateGraph(AgentState)
 
     graph.add_node("receive_question", _receive_question_node)
+    graph.add_node(
+        "resolve_pending_memory_proposal",
+        _make_resolve_pending_memory_proposal_node(decide_memory_fn, write_memory_fn, audit_memory_fn),
+    )
     graph.add_node("classify_intent", _make_classify_node(classify_fn))
+    graph.add_node("retrieve_memory", _make_retrieve_memory_node(read_memory_fn))
     graph.add_node("retrieve", _make_retrieve_node(retrieve_fn))
     graph.add_node("incidents_tool", _make_incidents_tool_node(incidents_tool_fn))
     graph.add_node("inventory_tool", _make_inventory_tool_node(inventory_tool_fn))
@@ -337,15 +551,22 @@ def build_graph(
     graph.add_node("no_context", _no_context_node)
     graph.add_node("empty_question", _empty_question_node)
     graph.add_node("tool_failed", _tool_failed_node)
+    graph.add_node("propose_memory", _make_propose_memory_node(evaluate_memory_fn))
 
     graph.add_edge(START, "receive_question")
     graph.add_conditional_edges(
         "receive_question",
         _route_after_receive_question,
-        {"empty_question": "empty_question", "classify_intent": "classify_intent"},
+        {
+            "empty_question": "empty_question",
+            "resolve_pending_memory_proposal": "resolve_pending_memory_proposal",
+            "classify_intent": "classify_intent",
+        },
     )
+    graph.add_edge("resolve_pending_memory_proposal", "classify_intent")
+    graph.add_edge("classify_intent", "retrieve_memory")
     graph.add_conditional_edges(
-        "classify_intent",
+        "retrieve_memory",
         _route_after_classify,
         {"rag": "retrieve", "incidents_tool": "incidents_tool", "inventory_tool": "inventory_tool"},
     )
@@ -364,8 +585,9 @@ def build_graph(
         _route_after_retrieve,
         {"no_context": "no_context", "generate": "generate"},
     )
-    graph.add_edge("generate", END)
-    graph.add_edge("no_context", END)
+    graph.add_edge("generate", "propose_memory")
+    graph.add_edge("no_context", "propose_memory")
+    graph.add_edge("propose_memory", END)
     graph.add_edge("empty_question", END)
     graph.add_edge("tool_failed", END)
 
@@ -396,6 +618,11 @@ async def run_agent(
     classify_fn: Callable[[str], str] = classify_intent,
     incidents_tool_fn: Callable[[dict[str, Any]], Any] = _default_incidents_tool_call,
     inventory_tool_fn: Callable[[dict[str, Any]], Any] = _default_inventory_tool_call,
+    read_memory_fn: Callable[[str], Any] = _default_read_memory,
+    evaluate_memory_fn: Callable[[str, str], MemoryProposal | None] = evaluate_for_memory_proposal,
+    decide_memory_fn: Callable[[str], MemoryDecision] = classify_memory_decision,
+    write_memory_fn: Callable[[str, str, str, str], None] = _default_write_memory,
+    audit_memory_fn: Callable[..., None] = _default_record_memory_decision,
     checkpointer: Any = None,
 ) -> tuple[AgentState, list[dict[str, Any]], str]:
     """Corre el grafo de punta a punta. Devuelve `(estado_final, trace, thread_id)`.
@@ -403,6 +630,11 @@ async def run_agent(
     `async def` porque `incidents_tool`/`inventory_tool` llaman al MCP
     Server vía `langchain-mcp-adapters` (async) -- ver docstring del módulo,
     "Migración a MCP".
+
+    `thread_id` importa más que antes (Hito 8): `pending_memory_proposal`
+    solo sobrevive al turno siguiente si el caller reutiliza el MISMO
+    `thread_id` -- ver `_DEFAULT_CHECKPOINTER`, compartido entre llamadas
+    para que esto funcione a través de requests HTTP separados.
 
     El trace es la secuencia real `[{"node": ..., "output": ...}, ...]` en
     el orden en que LangGraph ejecutó los nodos (`stream_mode="updates"`),
@@ -415,16 +647,29 @@ async def run_agent(
         classify_fn=classify_fn,
         incidents_tool_fn=incidents_tool_fn,
         inventory_tool_fn=inventory_tool_fn,
-        checkpointer=checkpointer,
+        read_memory_fn=read_memory_fn,
+        evaluate_memory_fn=evaluate_memory_fn,
+        decide_memory_fn=decide_memory_fn,
+        write_memory_fn=write_memory_fn,
+        audit_memory_fn=audit_memory_fn,
+        checkpointer=checkpointer or _DEFAULT_CHECKPOINTER,
     )
     thread_id = thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
 
     trace: list[dict[str, Any]] = []
-    final_state: dict[str, Any] = {"question": question}
+    final_state: dict[str, Any] = {"question": question, "thread_id": thread_id}
 
-    async for update in compiled_graph.astream({"question": question}, config=config, stream_mode="updates"):
+    async for update in compiled_graph.astream(
+        {"question": question, "thread_id": thread_id}, config=config, stream_mode="updates"
+    ):
         for node_name, partial_state in update.items():
+            # LangGraph representa un nodo que no cambio nada del estado
+            # (p. ej. `propose_memory` cuando no hay nada memorable, que
+            # devuelve `{}`) como `None` en el stream de "updates" -- no es
+            # un error, es "sin cambios" (descubierto corriendo este
+            # escenario, ver Pasos/).
+            partial_state = partial_state or {}
             trace.append({"node": node_name, "output": partial_state})
             final_state.update(partial_state)
 

@@ -15,10 +15,22 @@ dependencies = [
     "openai>=1.0.0,<4.0.0",
     "langgraph>=1.2.12",
     "langchain-mcp-adapters>=0.3.2",
+    "redis>=5.0.0,<6.0.0",
 ]
 
 [tool.setuptools]
-py-modules = ["main", "schemas", "pipeline_path", "agent_graph", "mcp_client", "intent_extraction"]
+py-modules = [
+    "main",
+    "schemas",
+    "pipeline_path",
+    "agent_graph",
+    "mcp_client",
+    "intent_extraction",
+    "memory_store",
+    "memory_proposal",
+    "memory_decision",
+    "memory_audit",
+]
 packages = ["routers"]
 
 [build-system]
@@ -27,5 +39,6 @@ build-backend = "setuptools.build_meta"
 
 [dependency-groups]
 dev = [
+    "fakeredis>=2.39.0",
     "pytest>=9.1.1",
 ]
