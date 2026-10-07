@@ -14,13 +14,14 @@ dependencies = [
     "sqlmodel>=0.0.39",
     "psycopg2-binary>=2.9.12",
     "pandas>=2.2.0,<3.0.0",
+    "celery[redis]>=5.4.0,<6.0.0",
 ]
 
 [project.scripts]
 seed = "seed:main"
 
 [tool.setuptools]
-py-modules = ["auth_service", "database", "main", "models", "schemas", "seed", "user_service"]
+py-modules = ["auth_service", "celery_app", "database", "main", "models", "schemas", "seed", "task_dlq", "tasks", "user_service"]
 packages = ["routers", "telemetry"]
 
 [build-system]

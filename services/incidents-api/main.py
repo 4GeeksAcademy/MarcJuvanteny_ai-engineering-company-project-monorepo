@@ -7,7 +7,8 @@ from threading import RLock
 from time import monotonic
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, status
+from celery.result import AsyncResult
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -21,14 +22,13 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from auth_service import authenticate_user, create_access_token, decode_password_reset_token, get_user_from_token, verify_password
+from celery_app import celery_app
 from database import SQL_ENGINE, get_db, get_tinydb_path
-from incident_analysis import CSVInputError, read_csv_text, summarize_rows, summary_to_csv_text
+from incident_analysis import summary_to_csv_text
 from models import (
     AuthMeProfile,
     AuthMeResponse,
     ChangePasswordRequest,
-    IncidentAnalysisExportResponse,
-    IncidentAnalysisResponse,
     ForgotPasswordRequest,
     IncidentCreate,
     IncidentListItem,
@@ -46,6 +46,8 @@ from models import (
     SupplierRateUpdate,
     SupplierRecord,
     SupplierStatusUpdate,
+    TaskEnqueuedResponse,
+    TaskStatusResponse,
     TokenResponse,
     UserCredentialsUpdate,
     UserListItem,
@@ -64,6 +66,7 @@ from models import (
 from password_reset_service import confirm_password_reset, request_password_reset
 from routers.inventory import router as inventory_router, seed_inventory_if_empty
 from routers.telemetry import router as telemetry_router
+from tasks import analyze_incidents_csv_task
 from user_service import (
     create_user as create_user_service,
     delete_user as delete_user_service,
@@ -76,7 +79,6 @@ from user_service import (
 )
 
 app = FastAPI(title="Incidents API", version="0.1.0")
-LAST_ANALYSIS_SUMMARY: IncidentAnalysisResponse | None = None
 # Keep a module-level reference so the Supabase SQLModel engine is initialized at startup.
 SUPABASE_SQL_ENGINE = SQL_ENGINE
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -738,13 +740,12 @@ async def change_password(
     return MessageResponse(message="Contrasena actualizada correctamente.")
 
 
-@app.post("/api/incidents/analyze", response_model=IncidentAnalysisResponse)
+@app.post("/api/incidents/analyze", response_model=TaskEnqueuedResponse, status_code=status.HTTP_202_ACCEPTED)
 async def analyze_incidents_csv(
     file: UploadFile = File(...),
     current_user: UserWithProfileRecord = Depends(get_current_user),
-) -> IncidentAnalysisResponse:
+) -> TaskEnqueuedResponse:
     _ = current_user
-    global LAST_ANALYSIS_SUMMARY
 
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(
@@ -764,26 +765,49 @@ async def analyze_incidents_csv(
             detail="Unsupported file encoding: CSV must be UTF-8 encoded.",
         ) from exc
 
-    try:
-        rows = read_csv_text(text)
-    except CSVInputError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    # Solo las validaciones baratas (extension, vacio, decodificable) corren
+    # aqui. El parseo/validacion fila a fila (read_csv_text) y la agregacion
+    # (summarize_rows) -- el trabajo O(n) que hacia "Muy alto" el coste de
+    # este endpoint -- se movieron enteros a la tarea Celery: si el CSV
+    # resulta mal formado, eso ahora se descubre de forma asincrona (ver
+    # GET /tasks/{task_id}), no en este request.
+    async_result = analyze_incidents_csv_task.delay(text)
+    return TaskEnqueuedResponse(task_id=async_result.id)
 
-    LAST_ANALYSIS_SUMMARY = IncidentAnalysisResponse.model_validate(summarize_rows(rows))
-    return LAST_ANALYSIS_SUMMARY
+
+_CELERY_STATUS_MAP = {
+    "PENDING": "pending",
+    "STARTED": "started",
+    "RETRY": "started",  # para quien consulta el estado, un retry en curso sigue "corriendo"
+    "SUCCESS": "success",
+    "FAILURE": "failure",
+}
 
 
-@app.get("/api/incidents/results/export", response_model=IncidentAnalysisExportResponse)
-async def export_last_analysis_results(
+@app.get("/tasks/{task_id}", response_model=TaskStatusResponse)
+async def get_task_status(
+    task_id: str,
     current_user: UserWithProfileRecord = Depends(get_current_user),
-) -> IncidentAnalysisExportResponse:
+) -> TaskStatusResponse:
     _ = current_user
-    if LAST_ANALYSIS_SUMMARY is None:
-        raise HTTPException(status_code=404, detail="No analysis results available yet.")
+    async_result = AsyncResult(task_id, app=celery_app)
+    task_status = _CELERY_STATUS_MAP.get(async_result.state, async_result.state.lower())
+    result = async_result.result if async_result.successful() else None
+    return TaskStatusResponse(task_id=task_id, status=task_status, result=result)
 
-    csv_text = summary_to_csv_text(LAST_ANALYSIS_SUMMARY.model_dump())
-    return IncidentAnalysisExportResponse(
-        filename="results.csv",
-        content_type="text/csv; charset=utf-8",
-        csv_content=csv_text,
+
+@app.get("/api/incidents/results/export")
+async def export_analysis_results(
+    task_id: str,
+    current_user: UserWithProfileRecord = Depends(get_current_user),
+) -> Response:
+    _ = current_user
+    async_result = AsyncResult(task_id, app=celery_app)
+    if not async_result.successful():
+        raise HTTPException(status_code=404, detail="No successful analysis result available for that task_id.")
+
+    return Response(
+        content=summary_to_csv_text(async_result.result),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="results.csv"'},
     )

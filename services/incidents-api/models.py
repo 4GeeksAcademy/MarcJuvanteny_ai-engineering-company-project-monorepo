@@ -496,6 +496,20 @@ class MessageResponse(BaseModel):
     message: str
 
 
+class TaskEnqueuedResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+
+
+class TaskStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+    status: str
+    result: dict[str, Any] | None = None
+
+
 class AuthMeProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
