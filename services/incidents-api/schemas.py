@@ -39,6 +39,15 @@ class SKUResponse(BaseModel):
     current_stock: int
 
 
+class SKUSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    sku: str
+    name: str
+    warehouse: str
+
+
 class StockEntryCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -58,12 +67,11 @@ class StockEntryResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: int
-    sku_id: int
+    sku: SKUSummary
     quantity: int
     reference: str
     warehouse: str
     created_at: datetime
-    user_uuid: str
 
 
 class StockExitCreate(BaseModel):
@@ -96,13 +104,12 @@ class StockExitResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: int
-    sku_id: int
+    sku: SKUSummary
     quantity: int
     exit_type: str
     tracking_number: str | None = None
     warehouse: str
     created_at: datetime
-    user_uuid: str
 
 
 class StockMovementResponse(BaseModel):
@@ -110,13 +117,10 @@ class StockMovementResponse(BaseModel):
 
     movement_type: str
     id: int
-    sku_id: int
-    sku: str
-    sku_name: str
+    sku: SKUSummary
     warehouse: str
     quantity: int
     created_at: datetime
-    user_uuid: str
     reference: str | None = None
     exit_type: str | None = None
     tracking_number: str | None = None

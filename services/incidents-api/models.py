@@ -196,6 +196,19 @@ class SupplierRecord(SupplierResponse):
     id: int = Field(gt=0)
 
 
+class SupplierListItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(gt=0)
+    name: str
+    country: str
+    categories: list[str]
+    rate_per_shipment: float
+    currency: str
+    status: SupplierStatus
+    updated_at: datetime
+
+
 class SupplierRateUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -251,6 +264,19 @@ class IncidentResponse(IncidentBase):
 
 class IncidentRecord(IncidentResponse):
     id: int = Field(gt=0)
+
+
+class IncidentListItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(gt=0)
+    title: str
+    category: str
+    origin: IncidentOrigin
+    status: IncidentStatus
+    branch: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class IncidentStatusUpdate(BaseModel):
@@ -365,6 +391,14 @@ class ProfileRecord(ProfileResponse):
     id: int = Field(gt=0)
 
 
+class ProfilePublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    phone: str | None = None
+    address: str | None = None
+
+
 class ProfileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, validate_assignment=True)
 
@@ -375,6 +409,28 @@ class ProfileUpdate(BaseModel):
 
 class UserWithProfileRecord(UserRecord):
     profile: ProfileRecord | None = None
+
+
+class UserPublicRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(gt=0)
+    email: str
+    is_active: bool
+    role: UserRole
+    created_at: datetime
+    profile: ProfilePublic | None = None
+
+
+class UserListItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(gt=0)
+    email: str
+    is_active: bool
+    role: UserRole
+    created_at: datetime
+    profile_name: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -468,6 +524,27 @@ class AuthMeResponse(BaseModel):
     email: str
     role: UserRole
     profile: AuthMeProfile | None = None
+
+
+class IncidentAnalysisResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total_processed_incidents: int
+    total_valid_incidents: int
+    total_invalid_incidents: int
+    invalid_records_by_problem_type: dict[str, int]
+    incidents_by_category: dict[str, int]
+    incidents_by_status: dict[str, int]
+    incidents_by_country: dict[str, int]
+    average_satisfaction_closed_cases_with_score: float | None
+
+
+class IncidentAnalysisExportResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str
+    content_type: str
+    csv_content: str
 
 
 User = UserRecord

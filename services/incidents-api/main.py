@@ -31,25 +31,27 @@ from models import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
     IncidentCreate,
+    IncidentListItem,
     IncidentRecord,
-    IncidentResponse,
     IncidentStatus,
     IncidentStatusUpdate,
     IncidentSummary,
     LoginRequest,
     MessageResponse,
+    ProfilePublic,
     SupplierCreate,
-    ProfileRecord,
+    SupplierListItem,
     ProfileUpdate,
     ResetPasswordRequest,
     SupplierRateUpdate,
     SupplierRecord,
-    SupplierResponse,
     SupplierStatusUpdate,
     TaskEnqueuedResponse,
     TaskStatusResponse,
     TokenResponse,
     UserCredentialsUpdate,
+    UserListItem,
+    UserPublicRecord,
     UserRegister,
     UserRole,
     UserWithProfileRecord,
@@ -86,7 +88,7 @@ SUPPLIERS_CACHE_TTL_SECONDS = 45
 AUTH_ME_CACHE_TTL_SECONDS = 20
 
 SUPPLIERS_CACHE_LOCK = RLock()
-SUPPLIERS_CACHE: dict[str, tuple[float, list[SupplierRecord]]] = {}
+SUPPLIERS_CACHE: dict[str, tuple[float, list[SupplierListItem]]] = {}
 
 AUTH_ME_CACHE_LOCK = RLock()
 AUTH_ME_CACHE: dict[str, tuple[float, AuthMeResponse]] = {}
@@ -220,6 +222,62 @@ def supplier_document_to_record(document: Document) -> SupplierRecord:
     return SupplierRecord(**payload)
 
 
+def _to_user_public_record(user: UserWithProfileRecord) -> UserPublicRecord:
+    profile_payload = None
+    if user.profile is not None:
+        profile_payload = ProfilePublic(
+            name=user.profile.name,
+            phone=user.profile.phone,
+            address=user.profile.address,
+        )
+
+    return UserPublicRecord(
+        id=user.id,
+        email=user.email,
+        is_active=user.is_active,
+        role=user.role,
+        created_at=user.created_at,
+        profile=profile_payload,
+    )
+
+
+def _to_user_list_item(user: UserWithProfileRecord) -> UserListItem:
+    return UserListItem(
+        id=user.id,
+        email=user.email,
+        is_active=user.is_active,
+        role=user.role,
+        created_at=user.created_at,
+        profile_name=user.profile.name if user.profile is not None else None,
+    )
+
+
+def _to_supplier_list_item(supplier: SupplierRecord) -> SupplierListItem:
+    return SupplierListItem(
+        id=supplier.id,
+        name=supplier.name,
+        country=supplier.country,
+        categories=supplier.categories,
+        rate_per_shipment=float(supplier.rate_per_shipment),
+        currency=supplier.currency,
+        status=supplier.status,
+        updated_at=supplier.updated_at,
+    )
+
+
+def _to_incident_list_item(incident: IncidentRecord) -> IncidentListItem:
+    return IncidentListItem(
+        id=incident.id,
+        title=incident.title,
+        category=incident.category,
+        origin=incident.origin,
+        status=incident.status,
+        branch=incident.branch,
+        created_at=incident.created_at,
+        updated_at=incident.updated_at,
+    )
+
+
 def get_supplier_document_or_404(supplier_id: int) -> Document:
     with TinyDB(get_suppliers_db_path()) as db:
         suppliers_table = db.table("suppliers")
@@ -251,8 +309,8 @@ async def create_supplier(
     current_user: UserWithProfileRecord = Depends(get_current_user),
 ) -> SupplierRecord:
     _ = current_user
-    supplier = SupplierResponse(**payload.model_dump())
-    supplier_data = supplier.model_dump(mode="json")
+    supplier_data = payload.model_dump(mode="json")
+    supplier_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     with TinyDB(get_suppliers_db_path()) as db:
         suppliers_table = db.table("suppliers")
@@ -270,13 +328,13 @@ async def create_supplier(
     return supplier_document_to_record(created_document)
 
 
-@app.get("/suppliers", response_model=list[SupplierRecord])
+@app.get("/suppliers", response_model=list[SupplierListItem])
 async def list_suppliers(
     country: str | None = Query(default=None),
     category: str | None = Query(default=None),
     current_user: UserWithProfileRecord = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> list[SupplierRecord]:
+) -> list[SupplierListItem]:
     _ = current_user, db
     validate_supplier_filters(country, category)
 
@@ -298,7 +356,7 @@ async def list_suppliers(
             continue
         filtered_documents.append(document)
 
-    rows = [supplier_document_to_record(document) for document in filtered_documents]
+    rows = [_to_supplier_list_item(supplier_document_to_record(document)) for document in filtered_documents]
     with SUPPLIERS_CACHE_LOCK:
         _cache_set(SUPPLIERS_CACHE, cache_key, rows, SUPPLIERS_CACHE_TTL_SECONDS)
     return rows
@@ -360,11 +418,11 @@ async def update_supplier_status(
     return supplier_document_to_record(updated_document)
 
 
-@app.delete("/suppliers/{supplier_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/suppliers/{supplier_id}", response_model=MessageResponse)
 async def delete_supplier(
     supplier_id: int,
     current_user: UserWithProfileRecord = Depends(get_current_user),
-) -> Response:
+) -> MessageResponse:
     _ = current_user
     get_supplier_document_or_404(supplier_id)
 
@@ -373,7 +431,7 @@ async def delete_supplier(
         suppliers_table.remove(doc_ids=[supplier_id])
 
     _invalidate_suppliers_cache()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return MessageResponse(message="Supplier deleted successfully.")
 
 
 def incident_document_to_record(document: Document) -> IncidentRecord:
@@ -418,8 +476,12 @@ async def create_incident(
     current_user: UserWithProfileRecord = Depends(get_current_user),
 ) -> IncidentRecord:
     _ = current_user
-    incident = IncidentResponse(**payload.model_dump())
-    incident_data = incident.model_dump(mode="json")
+    now = datetime.now(timezone.utc).isoformat()
+    incident_data = payload.model_dump(mode="json")
+    incident_data["status"] = IncidentStatus.OPEN.value
+    incident_data["source_incident_id"] = None
+    incident_data["created_at"] = now
+    incident_data["updated_at"] = now
 
     with TinyDB(get_suppliers_db_path()) as db:
         incidents_table = db.table("incidents")
@@ -429,14 +491,14 @@ async def create_incident(
     return incident_document_to_record(created_document)
 
 
-@app.get("/api/incidents", response_model=list[IncidentRecord])
+@app.get("/api/incidents", response_model=list[IncidentListItem])
 async def list_incidents(
     status_filter: str | None = Query(default=None, alias="status"),
     origin: str | None = Query(default=None),
     branch: str | None = Query(default=None),
     category: str | None = Query(default=None),
     current_user: UserWithProfileRecord = Depends(get_current_user),
-) -> list[IncidentRecord]:
+) -> list[IncidentListItem]:
     _ = current_user
     validate_incident_filters(status_filter, origin, branch, category)
 
@@ -456,7 +518,7 @@ async def list_incidents(
             continue
         filtered_documents.append(document)
 
-    return [incident_document_to_record(document) for document in filtered_documents]
+    return [_to_incident_list_item(incident_document_to_record(document)) for document in filtered_documents]
 
 
 @app.get("/api/incidents/summary", response_model=IncidentSummary)
@@ -521,41 +583,45 @@ async def update_incident_status(
     return incident_document_to_record(updated_document)
 
 
-@app.post("/users", response_model=UserWithProfileRecord, status_code=status.HTTP_201_CREATED)
-async def create_user(payload: UserRegister) -> UserWithProfileRecord:
-    return create_user_service(get_suppliers_db_path(), payload)
+@app.post("/users", response_model=UserPublicRecord, status_code=status.HTTP_201_CREATED)
+async def create_user(payload: UserRegister) -> UserPublicRecord:
+    created_user = create_user_service(get_suppliers_db_path(), payload)
+    return _to_user_public_record(created_user)
 
 
-@app.get("/users", response_model=list[UserWithProfileRecord])
-async def list_users(current_user: UserWithProfileRecord = Depends(get_current_user)) -> list[UserWithProfileRecord]:
+@app.get("/users", response_model=list[UserListItem])
+async def list_users(current_user: UserWithProfileRecord = Depends(get_current_user)) -> list[UserListItem]:
     _ = current_user
-    return list_users_service(get_suppliers_db_path())
+    users = list_users_service(get_suppliers_db_path())
+    return [_to_user_list_item(user) for user in users]
 
 
-@app.get("/users/by-email", response_model=UserWithProfileRecord)
+@app.get("/users/by-email", response_model=UserPublicRecord)
 async def get_user_by_email_route(
     email: str = Query(..., min_length=5),
     current_user: UserWithProfileRecord = Depends(get_current_user),
-) -> UserWithProfileRecord:
+) -> UserPublicRecord:
     _ = current_user
-    return get_user_by_email(get_suppliers_db_path(), email)
+    user = get_user_by_email(get_suppliers_db_path(), email)
+    return _to_user_public_record(user)
 
 
-@app.get("/users/{user_id}", response_model=UserWithProfileRecord)
+@app.get("/users/{user_id}", response_model=UserPublicRecord)
 async def get_user(
     user_id: int,
     current_user: UserWithProfileRecord = Depends(get_current_user),
-) -> UserWithProfileRecord:
+) -> UserPublicRecord:
     ensure_self_or_admin(current_user, user_id)
-    return get_user_by_id(get_suppliers_db_path(), user_id)
+    user = get_user_by_id(get_suppliers_db_path(), user_id)
+    return _to_user_public_record(user)
 
 
-@app.put("/users/{user_id}", response_model=UserWithProfileRecord)
+@app.put("/users/{user_id}", response_model=UserPublicRecord)
 async def update_user(
     user_id: int,
     payload: UserCredentialsUpdate,
     current_user: UserWithProfileRecord = Depends(get_current_user),
-) -> UserWithProfileRecord:
+) -> UserPublicRecord:
     ensure_self_or_admin(current_user, user_id)
 
     if payload.role is not None and current_user.role != UserRole.ADMIN:
@@ -566,33 +632,34 @@ async def update_user(
 
     updated_user = update_user_service(get_suppliers_db_path(), user_id, payload)
     _invalidate_auth_me_cache_for_user(user_id)
-    return updated_user
+    return _to_user_public_record(updated_user)
 
 
-@app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/users/{user_id}", response_model=MessageResponse)
 async def delete_user(
     user_id: int,
     current_user: UserWithProfileRecord = Depends(get_current_user),
-) -> Response:
+) -> MessageResponse:
     ensure_self_or_admin(current_user, user_id)
     delete_user_service(get_suppliers_db_path(), user_id)
     _invalidate_auth_me_cache_for_user(user_id)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return MessageResponse(message="User deleted successfully.")
 
 
-@app.get("/profiles/me", response_model=ProfileRecord)
-async def get_my_profile(current_user: UserWithProfileRecord = Depends(get_current_user)) -> ProfileRecord:
-    return get_profile_by_user_id(get_suppliers_db_path(), current_user.id)
+@app.get("/profiles/me", response_model=ProfilePublic)
+async def get_my_profile(current_user: UserWithProfileRecord = Depends(get_current_user)) -> ProfilePublic:
+    profile = get_profile_by_user_id(get_suppliers_db_path(), current_user.id)
+    return ProfilePublic(name=profile.name, phone=profile.phone, address=profile.address)
 
 
-@app.put("/profiles/me", response_model=ProfileRecord)
+@app.put("/profiles/me", response_model=ProfilePublic)
 async def update_my_profile(
     payload: ProfileUpdate,
     current_user: UserWithProfileRecord = Depends(get_current_user),
-) -> ProfileRecord:
+) -> ProfilePublic:
     updated_profile = update_profile_by_user_id(get_suppliers_db_path(), current_user.id, payload)
     _invalidate_auth_me_cache_for_user(current_user.id)
-    return updated_profile
+    return ProfilePublic(name=updated_profile.name, phone=updated_profile.phone, address=updated_profile.address)
 
 
 @app.post("/auth/login", response_model=TokenResponse)
