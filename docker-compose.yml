@@ -105,6 +105,44 @@ services:
     networks:
       - trackflow_network
 
+  # Base vectorial del RAG (CONTEXT7.md, Hito 7). Coleccion "trackflow_knowledge",
+  # creada/poblada por data/process/rag.py:setup(). Alternativa a Qdrant Cloud
+  # mencionada en la guia -- este servicio es para desarrollo local.
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
+    ports:
+      - "6333:6333" # REST + dashboard (http://localhost:6333/dashboard)
+      - "6334:6334" # gRPC
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - trackflow_network
+
+  # Fase 3 del RAG: POST /knowledge/query. Capa HTTP fina sobre
+  # data/pipelines/rag.py::query() -- no duplica logica de recuperacion/generacion.
+  knowledge-api:
+    build:
+      context: .
+      dockerfile: services/knowledge-api/Dockerfile
+    working_dir: /app/services/knowledge-api
+    command: uvicorn main:app --host 0.0.0.0 --port 8020 --reload
+    volumes:
+      - ./data/process/rag.py:/app/data/process/rag.py
+      - ./data/pipelines/rag.py:/app/data/pipelines/rag.py
+      - ./services/knowledge-api:/app/services/knowledge-api
+    environment:
+      PYTHONUNBUFFERED: "1"
+      QDRANT_URL: http://qdrant:6333
+    ports:
+      - "8020:8020"
+    depends_on:
+      - qdrant
+    networks:
+      - trackflow_network
+
 networks:
   trackflow_network:
     name: trackflow_network
+
+volumes:
+  qdrant_storage:

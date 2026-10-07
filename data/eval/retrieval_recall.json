@@ -1,0 +1,140 @@
+{
+  "recall_at_k": 0.8,
+  "k": 3,
+  "hits": 8,
+  "total": 10,
+  "hits_surviving_min_score": 3,
+  "min_score_used_for_secondary_check": 0.5,
+  "details": [
+    {
+      "id": "q1",
+      "question": "¿Cuál es la ventana de devolución estándar de TrackFlow?",
+      "expected": "returns-policy / Ventana de devolución estándar",
+      "hit": true,
+      "hit_rank": 1,
+      "survives_min_score": true,
+      "retrieved": [
+        "returns-policy / Ventana de devolución estándar",
+        "sla-delivery / Resumen",
+        "storage-pricing / Costes adicionales"
+      ]
+    },
+    {
+      "id": "q2",
+      "question": "¿Las devoluciones internacionales se procesan de forma automática?",
+      "expected": "returns-policy / Devoluciones internacionales",
+      "hit": true,
+      "hit_rank": 1,
+      "survives_min_score": false,
+      "retrieved": [
+        "returns-policy / Devoluciones internacionales",
+        "carrier-coverage / Transportistas internacionales",
+        "returns-policy / Resumen"
+      ]
+    },
+    {
+      "id": "q3",
+      "question": "¿Qué transportista cubre mejor las zonas rurales de Aragón?",
+      "expected": "carrier-coverage / Cobertura en España",
+      "hit": true,
+      "hit_rank": 2,
+      "survives_min_score": false,
+      "retrieved": [
+        "carrier-coverage / Resumen",
+        "carrier-coverage / Cobertura en España",
+        "returns-policy / Devoluciones internacionales"
+      ]
+    },
+    {
+      "id": "q4",
+      "question": "¿Qué transportista se usa para los envíos internacionales desde el almacén de Los Ángeles?",
+      "expected": "carrier-coverage / Transportistas internacionales",
+      "hit": true,
+      "hit_rank": 1,
+      "survives_min_score": true,
+      "retrieved": [
+        "carrier-coverage / Transportistas internacionales",
+        "sla-delivery / Resumen",
+        "sla-delivery / SLA de entrega internacional"
+      ]
+    },
+    {
+      "id": "q5",
+      "question": "¿Cuál es el SLA de entrega estándar para la Península Ibérica?",
+      "expected": "sla-delivery / SLA de entrega nacional — España",
+      "hit": false,
+      "hit_rank": null,
+      "survives_min_score": false,
+      "retrieved": [
+        "returns-policy / Ventana de devolución estándar",
+        "sla-delivery / Resumen",
+        "sla-delivery / Advertencia sobre picos de demanda (Black Friday y Rebajas)"
+      ]
+    },
+    {
+      "id": "q6",
+      "question": "¿Se le puede prometer a un cliente el SLA de entrega estándar durante el Black Friday?",
+      "expected": "sla-delivery / Advertencia sobre picos de demanda (Black Friday y Rebajas)",
+      "hit": true,
+      "hit_rank": 1,
+      "survives_min_score": false,
+      "retrieved": [
+        "sla-delivery / Advertencia sobre picos de demanda (Black Friday y Rebajas)",
+        "storage-pricing / Descuentos por volumen y aprobación requerida",
+        "returns-policy / Devoluciones internacionales"
+      ]
+    },
+    {
+      "id": "q7",
+      "question": "¿Cuánto cuesta almacenar un palet estándar en el almacén de Zaragoza?",
+      "expected": "storage-pricing / Tarifas de almacenamiento — Zaragoza",
+      "hit": true,
+      "hit_rank": 1,
+      "survives_min_score": false,
+      "retrieved": [
+        "storage-pricing / Tarifas de almacenamiento — Zaragoza",
+        "sla-delivery / Advertencia sobre picos de demanda (Black Friday y Rebajas)",
+        "sla-delivery / Resumen"
+      ]
+    },
+    {
+      "id": "q8",
+      "question": "¿Puede un account manager ofrecer un descuento de almacenamiento sin aprobación?",
+      "expected": "storage-pricing / Descuentos por volumen y aprobación requerida",
+      "hit": true,
+      "hit_rank": 1,
+      "survives_min_score": true,
+      "retrieved": [
+        "storage-pricing / Descuentos por volumen y aprobación requerida",
+        "storage-pricing / Costes adicionales",
+        "returns-policy / Devoluciones internacionales"
+      ]
+    },
+    {
+      "id": "q9",
+      "question": "¿Qué transportista de Estados Unidos está suspendido actualmente?",
+      "expected": "carrier-coverage / Transportistas suspendidos",
+      "hit": true,
+      "hit_rank": 1,
+      "survives_min_score": false,
+      "retrieved": [
+        "carrier-coverage / Transportistas suspendidos",
+        "carrier-coverage / Cobertura en Estados Unidos",
+        "returns-policy / Devoluciones nacionales (España / Estados Unidos)"
+      ]
+    },
+    {
+      "id": "q10",
+      "question": "¿Cuál es el plazo de entrega para un envío urgente dentro de España?",
+      "expected": "sla-delivery / SLA de entrega nacional — España",
+      "hit": false,
+      "hit_rank": null,
+      "survives_min_score": false,
+      "retrieved": [
+        "carrier-coverage / Transportistas suspendidos",
+        "sla-delivery / Resumen",
+        "storage-pricing / Costes adicionales"
+      ]
+    }
+  ]
+}

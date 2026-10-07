@@ -1,0 +1,67 @@
+{
+  "cv_summary": {
+    "folds": [
+      {
+        "fold": 1,
+        "n_train": 14,
+        "n_val": 14,
+        "train_idx_max": 13,
+        "val_idx_min": 14,
+        "mae_eur": 51952.94800137327,
+        "rmse_eur": 55429.402866200086
+      },
+      {
+        "fold": 2,
+        "n_train": 28,
+        "n_val": 14,
+        "train_idx_max": 27,
+        "val_idx_min": 28,
+        "mae_eur": 38324.08807830743,
+        "rmse_eur": 48777.79897806893
+      },
+      {
+        "fold": 3,
+        "n_train": 42,
+        "n_val": 14,
+        "train_idx_max": 41,
+        "val_idx_min": 42,
+        "mae_eur": 26262.668601405872,
+        "rmse_eur": 32280.630457823205
+      },
+      {
+        "fold": 4,
+        "n_train": 56,
+        "n_val": 14,
+        "train_idx_max": 55,
+        "val_idx_min": 56,
+        "mae_eur": 43854.22243823367,
+        "rmse_eur": 49329.40364343969
+      },
+      {
+        "fold": 5,
+        "n_train": 70,
+        "n_val": 14,
+        "train_idx_max": 69,
+        "val_idx_min": 70,
+        "mae_eur": 37922.984363386124,
+        "rmse_eur": 47171.455479761
+      }
+    ],
+    "mae_mean_eur": 39663.38229654127,
+    "mae_std_eur": 8402.361427769196,
+    "rmse_mean_eur": 46597.738285058585,
+    "rmse_std_eur": 7687.934540373757
+  },
+  "train_errors": {
+    "mae_eur": 19133.192336370448,
+    "rmse_eur": 22516.937843321764
+  },
+  "diagnosis": {
+    "diagnosis": "overfitting",
+    "train_rmse_eur": 22516.937843321764,
+    "val_rmse_mean_eur": 46597.738285058585,
+    "val_rmse_std_eur": 7687.934540373757,
+    "gap_ratio_val_over_train": 2.0694527208493794,
+    "val_rmse_pct_of_avg_monthly_revenue": 4.645835249789776
+  }
+}

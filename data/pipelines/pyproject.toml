@@ -9,6 +9,8 @@ dependencies = [
     "sqlalchemy>=2.0.0,<3.0.0",
     "psycopg2-binary>=2.9.12",
     "python-dotenv>=1.0.1,<2.0.0",
+    "qdrant-client>=1.13,<1.15",
+    "openai>=3.19.2",
 ]
 
 [project.optional-dependencies]
@@ -17,7 +19,7 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["pipeline"]
+py-modules = ["pipeline", "rag"]
 packages = ["exec_weekly_inventory_kpis"]
 
 [build-system]

@@ -435,7 +435,10 @@ body {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 0.8rem 0.9rem;
-  background: #fff;
+  /* var(--surface), no #fff a secas: en modo oscuro un input blanco fijo
+     quedaria ilegible contra el resto de la UI (ver el bloque
+     prefers-color-scheme mas abajo). Mismo valor que #fff en modo claro. */
+  background: var(--surface);
   color: var(--foreground);
 }
 
@@ -736,7 +739,8 @@ body {
   .suppliers-summary-strip,
   .suppliers-filters-grid,
   .supplier-form-grid,
-  .auth-form-grid {
+  .auth-form-grid,
+  .knowledge-layout {
     grid-template-columns: 1fr;
   }
 
@@ -748,4 +752,76 @@ body {
   .summary-columns {
     grid-template-columns: 1fr;
   }
+}
+
+/* Modo oscuro: respeta la preferencia del sistema operativo (no hay
+   selector manual en el backoffice todavia). Redefine los mismos tokens de
+   :root de arriba -- el resto de la UI (incluidos .card/.field-block/
+   .primary-button/etc.) ya los usa, asi que se pone oscura sin tocar
+   ninguna otra regla. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0b1220;
+    --foreground: #e7edf7;
+    --ink: #e7edf7;
+    --muted: #93a4c2;
+    --surface: #131b2e;
+    --line: #26344d;
+    --accent: #4ea6e8;
+    --accent-soft: #16283d;
+    --ok: #3ddb9b;
+    --warn: #f0a04b;
+  }
+}
+
+.knowledge-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.knowledge-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.knowledge-examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.knowledge-example-chip {
+  border: 1px solid var(--line);
+  background: var(--accent-soft);
+  color: var(--foreground);
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.knowledge-example-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.knowledge-answer-card {
+  min-height: 12rem;
+}
+
+.knowledge-status {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.knowledge-answer {
+  color: var(--foreground);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
 }

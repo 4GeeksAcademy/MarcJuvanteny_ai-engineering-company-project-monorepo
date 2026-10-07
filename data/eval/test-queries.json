@@ -1,0 +1,76 @@
+{
+  "description": "Preguntas de prueba para el RAG de TrackFlow (CONTEXT7.md, Sección 5). Cubren los 4 documentos fuente, con al menos una sobre picos de demanda (q6). `expected_section` identifica el chunk correcto exacto (source_document + section) para medir Recall@3 contra data/pipelines/rag.py::retrieve() -- ver data/eval/evaluate_retrieval.py y docs/rag/rag-design.md.",
+  "queries": [
+    {
+      "id": "q1",
+      "question": "¿Cuál es la ventana de devolución estándar de TrackFlow?",
+      "expected_source_document": "returns-policy",
+      "expected_section": "Ventana de devolución estándar",
+      "expected_answer_mentions": ["30 días"]
+    },
+    {
+      "id": "q2",
+      "question": "¿Las devoluciones internacionales se procesan de forma automática?",
+      "expected_source_document": "returns-policy",
+      "expected_section": "Devoluciones internacionales",
+      "expected_answer_mentions": ["revisión manual", "no"]
+    },
+    {
+      "id": "q3",
+      "question": "¿Qué transportista cubre mejor las zonas rurales de Aragón?",
+      "expected_source_document": "carrier-coverage",
+      "expected_section": "Cobertura en España",
+      "expected_answer_mentions": ["Nacex"]
+    },
+    {
+      "id": "q4",
+      "question": "¿Qué transportista se usa para los envíos internacionales desde el almacén de Los Ángeles?",
+      "expected_source_document": "carrier-coverage",
+      "expected_section": "Transportistas internacionales",
+      "expected_answer_mentions": ["DHL Express USA"]
+    },
+    {
+      "id": "q5",
+      "question": "¿Cuál es el SLA de entrega estándar para la Península Ibérica?",
+      "expected_source_document": "sla-delivery",
+      "expected_section": "SLA de entrega nacional — España",
+      "expected_answer_mentions": ["24", "48 horas"]
+    },
+    {
+      "id": "q6",
+      "question": "¿Se le puede prometer a un cliente el SLA de entrega estándar durante el Black Friday?",
+      "expected_source_document": "sla-delivery",
+      "expected_section": "Advertencia sobre picos de demanda (Black Friday y Rebajas)",
+      "expected_answer_mentions": ["no", "SLA extendido", "pico de demanda"],
+      "notes": "Pregunta sobre picos de demanda (Black Friday / Rebajas) — CONTEXT7.md Sección 5."
+    },
+    {
+      "id": "q7",
+      "question": "¿Cuánto cuesta almacenar un palet estándar en el almacén de Zaragoza?",
+      "expected_source_document": "storage-pricing",
+      "expected_section": "Tarifas de almacenamiento — Zaragoza",
+      "expected_answer_mentions": ["14,00 EUR"]
+    },
+    {
+      "id": "q8",
+      "question": "¿Puede un account manager ofrecer un descuento de almacenamiento sin aprobación?",
+      "expected_source_document": "storage-pricing",
+      "expected_section": "Descuentos por volumen y aprobación requerida",
+      "expected_answer_mentions": ["no", "Miguel Torres", "aprobación"]
+    },
+    {
+      "id": "q9",
+      "question": "¿Qué transportista de Estados Unidos está suspendido actualmente?",
+      "expected_source_document": "carrier-coverage",
+      "expected_section": "Transportistas suspendidos",
+      "expected_answer_mentions": ["LaserShip"]
+    },
+    {
+      "id": "q10",
+      "question": "¿Cuál es el plazo de entrega para un envío urgente dentro de España?",
+      "expected_source_document": "sla-delivery",
+      "expected_section": "SLA de entrega nacional — España",
+      "expected_answer_mentions": ["24 horas", "DHL Express España"]
+    }
+  ]
+}

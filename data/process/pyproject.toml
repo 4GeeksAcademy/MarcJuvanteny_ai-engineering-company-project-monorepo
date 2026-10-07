@@ -1,0 +1,22 @@
+[project]
+name = "data-process"
+version = "0.1.0"
+description = "Scripts de transformacion reutilizables del monorepo TrackFlow (incluye chunking + indexacion RAG)"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=3.19.2",
+    "python-dotenv>=1.2.3",
+    "qdrant-client>=1.13,<1.15",
+]
+
+[tool.setuptools]
+py-modules = ["rag"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
