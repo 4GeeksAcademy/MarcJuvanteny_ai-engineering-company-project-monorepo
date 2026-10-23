@@ -11,16 +11,22 @@ dependencies = [
     "python-dotenv>=1.0.1,<2.0.0",
     "qdrant-client>=1.13,<1.15",
     "openai>=3.19.2",
+    # rfp_intake (Hito 9 Parte 1, CONTEXT9.md):
+    "langgraph>=1.2.12",
+    "sqlmodel>=0.0.22",
+    "markitdown[pdf]>=0.1.0",
+    "py-readability-metrics>=1.4.5",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0,<9.0.0",
+    "reportlab>=4.0.0",
 ]
 
 [tool.setuptools]
 py-modules = ["pipeline", "rag"]
-packages = ["exec_weekly_inventory_kpis"]
+packages = ["exec_weekly_inventory_kpis", "rfp_intake"]
 
 [build-system]
 requires = ["setuptools>=68.0"]

@@ -12,6 +12,7 @@ const navItems = [
   { href: "/incidents", label: "Gestion de incidencias", key: "incidents-management" },
   { href: "/suppliers", label: "Proveedores", key: "suppliers" },
   { href: "/knowledge", label: "Base de conocimiento", key: "knowledge" },
+  { href: "/rfp", label: "Recepcion de RFPs", key: "rfp" },
   { href: "/account/profile", label: "Mi cuenta", key: "account" },
   { href: "#", label: "Candidatos", key: "candidates" },
   { href: "#", label: "Pipeline", key: "pipeline" },
