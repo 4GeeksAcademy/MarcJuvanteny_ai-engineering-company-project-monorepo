@@ -27,7 +27,7 @@ celery_app = Celery(
     "incidents_api",
     broker=_redis_url(),
     backend=_redis_url(),
-    include=["tasks"],
+    include=["tasks", "rfp_tasks"],
 )
 
 celery_app.conf.update(

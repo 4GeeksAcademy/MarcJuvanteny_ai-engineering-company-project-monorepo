@@ -11,6 +11,7 @@
   --accent-soft: #e8f3ff;
   --ok: #0f8a5f;
   --warn: #c6670a;
+  --pending: #3f5e8a;
 }
 
 @theme inline {
@@ -133,7 +134,8 @@ body {
 }
 
 .badge-ok,
-.badge-warn {
+.badge-warn,
+.badge-pending {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
@@ -150,6 +152,25 @@ body {
 .badge-warn {
   color: var(--warn);
   background: #fff2e6;
+}
+
+.badge-pending {
+  color: var(--pending);
+  background: #e9f0fb;
+}
+
+@media (prefers-color-scheme: dark) {
+  .badge-ok {
+    background: #0f2a22;
+  }
+
+  .badge-warn {
+    background: #2e2110;
+  }
+
+  .badge-pending {
+    background: #182438;
+  }
 }
 
 .list {
@@ -771,6 +792,7 @@ body {
     --accent-soft: #16283d;
     --ok: #3ddb9b;
     --warn: #f0a04b;
+    --pending: #7fa8e0;
   }
 }
 

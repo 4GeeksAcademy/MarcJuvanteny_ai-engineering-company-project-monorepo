@@ -15,13 +15,35 @@ dependencies = [
     "psycopg2-binary>=2.9.12",
     "pandas>=2.2.0,<3.0.0",
     "celery[redis]>=5.4.0,<6.0.0",
+    # Dependencias de data/pipelines/rfp_intake (Hito 9 Parte 1,
+    # CONTEXT9.md): este servicio solo importa y dispara el grafo
+    # (`rfp_pipeline_path.py` + `routers/rfp.py` + `rfp_tasks.py`), nunca
+    # contiene su lógica -- pero corre en el mismo proceso, mismo
+    # trade-off que langgraph/qdrant-client/openai en
+    # services/knowledge-api/pyproject.toml para data/pipelines/rag.py.
+    "langgraph>=1.2.12",
+    "markitdown[pdf]>=0.1.0",
+    "py-readability-metrics>=1.4.5",
 ]
 
 [project.scripts]
 seed = "seed:main"
 
 [tool.setuptools]
-py-modules = ["auth_service", "celery_app", "database", "main", "models", "schemas", "seed", "task_dlq", "tasks", "user_service"]
+py-modules = [
+    "auth_service",
+    "celery_app",
+    "database",
+    "main",
+    "models",
+    "schemas",
+    "seed",
+    "task_dlq",
+    "tasks",
+    "user_service",
+    "rfp_pipeline_path",
+    "rfp_tasks",
+]
 packages = ["routers", "telemetry"]
 
 [build-system]

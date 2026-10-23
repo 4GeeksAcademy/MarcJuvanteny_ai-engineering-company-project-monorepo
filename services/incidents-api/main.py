@@ -65,6 +65,7 @@ from models import (
 )
 from password_reset_service import confirm_password_reset, request_password_reset
 from routers.inventory import router as inventory_router, seed_inventory_if_empty
+from routers.rfp import router as rfp_router
 from routers.telemetry import router as telemetry_router
 from tasks import analyze_incidents_csv_task
 from user_service import (
@@ -113,6 +114,7 @@ app.add_middleware(
 
 app.include_router(inventory_router)
 app.include_router(telemetry_router)
+app.include_router(rfp_router)
 
 
 @app.on_event("startup")
@@ -120,6 +122,16 @@ async def initialize_supabase_schema() -> None:
     SQLModel.metadata.create_all(SUPABASE_SQL_ENGINE)
     with Session(SUPABASE_SQL_ENGINE) as session:
         seed_inventory_if_empty(session)
+
+    # rfp_intake (Hito 9 Parte 1, CONTEXT9.md) tiene su propio motor
+    # (data/pipelines/.env, misma base física que services/incidents-api
+    # por diseño) -- explícito en vez de depender de que import-order
+    # haya registrado sus tablas en el SQLModel.metadata compartido antes
+    # de este create_all().
+    import rfp_pipeline_path  # noqa: F401
+    from rfp_intake.models import create_tables as create_rfp_tables
+
+    create_rfp_tables()
 
 
 @app.exception_handler(RequestValidationError)
