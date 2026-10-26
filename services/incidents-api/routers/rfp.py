@@ -1,10 +1,10 @@
-"""`POST /rfp/tickets` + `GET /rfp/tickets[/{id}]` (`CONTEXT/CONTEXT9.md`,
-Hito 9 Parte 1: "Sin API nuevo — extiende el backend existente en
-services/"). Capa HTTP fina: guarda el PDF subido, crea el `RFPTicket`, y
-dispara la tarea Celery (`rfp_tasks.py`) que corre todo el grafo -- ningún
-nodo del pipeline, ninguna lógica de clasificación/extracción vive acá
-(`CONTEXT9.md`: "los routers importan y disparan; no poseen la lógica de
-agentes").
+"""Endpoints HTTP de las 3 Partes de Hito 9 (`CONTEXT/CONTEXT9.md`: "Sin
+API nuevo — extiende el backend existente en services/"). Capa fina: para
+Partes 1-2 guarda/encola (Celery, trabajo pesado: PDF, LLM); para Parte 3
+(aprobación humana) corre síncrono -- es solo una transición de estado de
+grafo, sin trabajo pesado que encolar. Ningún nodo del pipeline, ninguna
+lógica de agentes vive acá (`CONTEXT9.md`: "los routers importan y
+disparan; no poseen la lógica de agentes").
 
 Autenticado con el mismo mecanismo que el resto de este backend
 (`auth_service.get_user_from_token`, mismo patrón que
@@ -27,8 +27,10 @@ from database import get_tinydb_path
 from models import UserWithProfileRecord
 
 import rfp_pipeline_path  # noqa: F401
+from pydantic import ValidationError
+from rfp_intake.approval_graph import ApprovalDecision
 from rfp_intake.models import RFPTicket, TicketStatus, get_sql_engine
-from rfp_intake.pipeline import get_ticket_with_metadata
+from rfp_intake.pipeline import get_ticket_with_metadata, resume_department_approval, start_or_get_approval_round
 from rfp_tasks import process_rfp_generation_task, process_rfp_ticket_task
 from sqlmodel import Session, select
 
@@ -120,6 +122,46 @@ async def generate_rfp_sections(
 
     process_rfp_generation_task.delay(ticket_id)
     return {"ticket_id": ticket_id, "status": TicketStatus.ANALISIS_COMPLETO.value, "queued": True}
+
+
+@router.post("/tickets/{ticket_id}/approval/start")
+async def start_approval_round(
+    ticket_id: int,
+    current_user: UserWithProfileRecord = Depends(get_current_rfp_user),
+) -> dict[str, Any]:
+    """Hito 9 Parte 3 -- arranca (o simplemente devuelve, si ya está en
+    curso) la ronda de aprobación humana por departamento para un ticket
+    que ya completó la Parte 2. A diferencia de `generate_rfp_sections`,
+    esto corre SÍNCRONO: no hay PDF que convertir ni LLM que esperar,
+    solo transiciones de estado de un grafo determinista -- encolarlo en
+    Celery sería indirección sin beneficio real."""
+
+    _ = current_user
+    try:
+        return start_or_get_approval_round(ticket_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/tickets/{ticket_id}/approval/{department_id}")
+async def submit_department_approval(
+    ticket_id: int,
+    department_id: str,
+    decision: ApprovalDecision,
+    current_user: UserWithProfileRecord = Depends(get_current_rfp_user),
+) -> dict[str, Any]:
+    """Hito 9 Parte 3 -- `resume` explícito de UN departamento. `decision`
+    ya llega validada por FastAPI/Pydantic vía `ApprovalDecision` (mismo
+    modelo que usa el grafo, nunca duplicado) antes de que
+    `resume_department_approval` construya el `Command(resume=...)`."""
+
+    _ = current_user
+    try:
+        return resume_department_approval(ticket_id, department_id, decision.model_dump())
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/tickets")

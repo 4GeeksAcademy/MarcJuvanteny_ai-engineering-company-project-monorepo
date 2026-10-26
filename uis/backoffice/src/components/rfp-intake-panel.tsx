@@ -4,7 +4,16 @@ import { ChangeEvent, DragEvent, useCallback, useEffect, useRef, useState } from
 
 import { useAuth } from "@/lib/auth-context";
 
-type TicketStatus = "analizando" | "descartado" | "analisis_completo" | string;
+type TicketStatus =
+  | "analizando"
+  | "descartado"
+  | "analisis_completo"
+  | "generando_borrador"
+  | "en_evaluación"
+  | "needs_human_review"
+  | "esperando_aprobación"
+  | "terminado"
+  | string;
 
 type RfpMetadata = {
   client_name: string | null;
@@ -19,6 +28,18 @@ type RfpMetadata = {
 type DepartmentSection = {
   department_id: string;
   key_aspects: Record<string, unknown>;
+  draft_content: string | null;
+  evaluation_results: { overall_pass?: boolean } | null;
+  approval_status: string | null;
+  approver: string | null;
+  approved_at: string | null;
+};
+
+type FinalDocument = {
+  ticket_id: number;
+  sections: Record<string, string>;
+  currency: string;
+  generated_at: string;
 };
 
 type TicketDetail = {
@@ -31,12 +52,39 @@ type TicketDetail = {
   };
   metadata: RfpMetadata | null;
   sections: DepartmentSection[];
+  final_document: FinalDocument | null;
+};
+
+// Hito 9 Parte 3 ("Aprobación humana por departamento"): la Parte 1 pide
+// aprobar/rechazar `{ decision, reason }` -- este payload llega del grafo
+// (`approval_graph.py::ApprovalState`, no de esta UI), nunca se recalcula
+// el `interrupt_id` acá.
+type PendingApproval = {
+  ticket_id: number;
+  department_id: string;
+  approver: string;
+  draft_content: string;
+  evaluation_results: { overall_pass?: boolean } | null;
+  iteration: number;
+  interrupt_id: string;
+};
+
+type ApprovalRoundState = {
+  ticket_id: number;
+  status: TicketStatus;
+  pending_approvals: PendingApproval[];
+  final_document?: FinalDocument | null;
 };
 
 const STATUS_LABELS: Record<string, string> = {
   analizando: "Analizando...",
   descartado: "Descartado",
   analisis_completo: "Analisis completo",
+  generando_borrador: "Generando propuesta...",
+  "en_evaluación": "En evaluacion",
+  needs_human_review: "Necesita revision humana",
+  "esperando_aprobación": "Esperando aprobacion",
+  terminado: "Terminado",
 };
 
 const DEPARTMENT_LABELS: Record<string, string> = {
@@ -46,8 +94,8 @@ const DEPARTMENT_LABELS: Record<string, string> = {
 };
 
 function statusBadgeClass(status: TicketStatus) {
-  if (status === "analisis_completo") return "badge-ok";
-  if (status === "descartado") return "badge-warn";
+  if (status === "analisis_completo" || status === "terminado") return "badge-ok";
+  if (status === "descartado" || status === "needs_human_review") return "badge-warn";
   return "badge-pending";
 }
 
@@ -59,6 +107,10 @@ export function RfpIntakePanel() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [tickets, setTickets] = useState<TicketDetail[]>([]);
   const pollingTicketIds = useRef<Set<number>>(new Set());
+  const [approvalsByTicket, setApprovalsByTicket] = useState<Record<number, PendingApproval[]>>({});
+  const [reasonDrafts, setReasonDrafts] = useState<Record<string, string>>({});
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   function assignFile(file: File | null) {
     setSelectedFile(file);
@@ -107,6 +159,77 @@ export function RfpIntakePanel() {
     }, 2000);
     return () => clearInterval(interval);
   }, [tickets, refreshTicketList]);
+
+  const loadApprovalRound = useCallback(
+    async (ticketId: number) => {
+      const response = await authFetch(`/rfp/tickets/${ticketId}/approval/start`, { method: "POST" });
+      const data = (await response.json().catch(() => null)) as ApprovalRoundState | { detail?: string } | null;
+      if (!response.ok) {
+        setActionError((data as { detail?: string } | null)?.detail || "No se pudo cargar la ronda de aprobacion.");
+        return;
+      }
+      const roundState = data as ApprovalRoundState;
+      setApprovalsByTicket((prev) => ({ ...prev, [ticketId]: roundState.pending_approvals }));
+      await refreshTicketList();
+    },
+    [authFetch, refreshTicketList]
+  );
+
+  // Hito 9 Parte 3: un ticket "esperando_aprobación" ya tiene una ronda en
+  // curso -- la UI la carga sola (misma llamada que "arrancarla", es
+  // idempotente, ver `pipeline.py::start_or_get_approval_round`).
+  useEffect(() => {
+    for (const detail of tickets) {
+      if (detail.ticket.status === "esperando_aprobación" && !approvalsByTicket[detail.ticket.id]) {
+        void loadApprovalRound(detail.ticket.id);
+      }
+    }
+  }, [tickets, approvalsByTicket, loadApprovalRound]);
+
+  async function triggerGeneration(ticketId: number) {
+    setBusyAction(`generate:${ticketId}`);
+    setActionError(null);
+    try {
+      const response = await authFetch(`/rfp/tickets/${ticketId}/generate`, { method: "POST" });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        setActionError(data?.detail || "No se pudo generar la propuesta.");
+        return;
+      }
+      await refreshTicketList();
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function submitDecision(
+    ticketId: number,
+    departmentId: string,
+    decision: "approve" | "reject" | "request_changes"
+  ) {
+    const reasonKey = `${ticketId}:${departmentId}`;
+    const reason = reasonDrafts[reasonKey]?.trim() || null;
+    setBusyAction(`${decision}:${ticketId}:${departmentId}`);
+    setActionError(null);
+    try {
+      const response = await authFetch(`/rfp/tickets/${ticketId}/approval/${departmentId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision, reason }),
+      });
+      const data = (await response.json().catch(() => null)) as ApprovalRoundState | { detail?: string } | null;
+      if (!response.ok) {
+        setActionError((data as { detail?: string } | null)?.detail || "No se pudo registrar la decision.");
+        return;
+      }
+      const roundState = data as ApprovalRoundState;
+      setApprovalsByTicket((prev) => ({ ...prev, [ticketId]: roundState.pending_approvals }));
+      setReasonDrafts((prev) => ({ ...prev, [reasonKey]: "" }));
+      await refreshTicketList();
+    } finally {
+      setBusyAction(null);
+    }
+  }
 
   async function submitFile() {
     if (!selectedFile) {
@@ -222,15 +345,117 @@ export function RfpIntakePanel() {
                     {detail.sections.map((section) => (
                       <li key={section.department_id}>
                         <span>{DEPARTMENT_LABELS[section.department_id] ?? section.department_id}</span>
-                        <strong>{Object.keys(section.key_aspects).length} aspectos clave</strong>
+                        <strong>
+                          {section.approval_status
+                            ? `${section.approval_status}${section.approver ? ` -- ${section.approver}` : ""}`
+                            : `${Object.keys(section.key_aspects).length} aspectos clave`}
+                        </strong>
                       </li>
                     ))}
                   </ul>
+                ) : null}
+
+                {detail.ticket.status === "analisis_completo" ? (
+                  <div className="analysis-actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => triggerGeneration(detail.ticket.id)}
+                      disabled={busyAction === `generate:${detail.ticket.id}`}
+                    >
+                      {busyAction === `generate:${detail.ticket.id}` ? "Generando..." : "Generar propuesta"}
+                    </button>
+                  </div>
+                ) : null}
+
+                {detail.ticket.status === "en_evaluación" || detail.ticket.status === "needs_human_review" ? (
+                  <div className="analysis-actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => loadApprovalRound(detail.ticket.id)}
+                    >
+                      Iniciar aprobacion por departamento
+                    </button>
+                  </div>
+                ) : null}
+
+                {detail.ticket.status === "esperando_aprobación" && approvalsByTicket[detail.ticket.id] ? (
+                  <div className="section-caption" style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                    <strong>Aprobacion pendiente por departamento</strong>
+                    {approvalsByTicket[detail.ticket.id].length === 0 ? (
+                      <span>Sin aprobaciones pendientes -- actualizando...</span>
+                    ) : (
+                      approvalsByTicket[detail.ticket.id].map((approval) => {
+                        const reasonKey = `${detail.ticket.id}:${approval.department_id}`;
+                        return (
+                          <div
+                            key={approval.department_id}
+                            style={{ border: "1px solid var(--border, #333)", borderRadius: "8px", padding: "0.75rem" }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <strong>{DEPARTMENT_LABELS[approval.department_id] ?? approval.department_id}</strong>
+                              <span>Responsable: {approval.approver}</span>
+                            </div>
+                            <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.85rem" }}>{approval.draft_content}</pre>
+                            <textarea
+                              placeholder="Motivo (obligatorio para rechazar / pedir cambios)"
+                              value={reasonDrafts[reasonKey] ?? ""}
+                              onChange={(event) =>
+                                setReasonDrafts((prev) => ({ ...prev, [reasonKey]: event.target.value }))
+                              }
+                              style={{ width: "100%", minHeight: "3rem" }}
+                            />
+                            <div className="analysis-actions">
+                              <button
+                                type="button"
+                                className="primary-button"
+                                disabled={busyAction === `approve:${detail.ticket.id}:${approval.department_id}`}
+                                onClick={() => submitDecision(detail.ticket.id, approval.department_id, "approve")}
+                              >
+                                Aprobar
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                disabled={busyAction === `request_changes:${detail.ticket.id}:${approval.department_id}`}
+                                onClick={() => submitDecision(detail.ticket.id, approval.department_id, "request_changes")}
+                              >
+                                Pedir cambios
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                disabled={busyAction === `reject:${detail.ticket.id}:${approval.department_id}`}
+                                onClick={() => submitDecision(detail.ticket.id, approval.department_id, "reject")}
+                              >
+                                Rechazar
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                ) : null}
+
+                {detail.ticket.status === "terminado" && detail.final_document ? (
+                  <div className="section-caption">
+                    <strong>Documento final ({detail.final_document.currency})</strong>
+                    {Object.entries(detail.final_document.sections).map(([departmentId, content]) => (
+                      <details key={departmentId}>
+                        <summary>{DEPARTMENT_LABELS[departmentId] ?? departmentId}</summary>
+                        <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.85rem" }}>{content}</pre>
+                      </details>
+                    ))}
+                  </div>
                 ) : null}
               </li>
             ))}
           </ul>
         )}
+
+        {actionError ? <p className="feedback-error">{actionError}</p> : null}
       </section>
     </div>
   );

@@ -11,10 +11,9 @@ base del monorepo (del que los `services/*` importan), nunca al revés --
 mismo patrón que `exec_weekly_inventory_kpis` ya usa para escribir a
 Postgres de forma independiente.
 
-`FinalDocument` (Sección 2.3 de `CONTEXT9.md`) no se modela todavía --
-pertenece a la Parte 3 (generación del documento final); esta entrega es
-solo Parte 1 y agregar esa tabla ahora sería diseño especulativo para un
-flujo que todavía no existe.
+`FinalDocument` y `RFPNodeTrace` (Hito 9 Parte 3, "Cierre del documento" y
+"Guardrails y control de flujo" -- trazabilidad por ejecución de nodo) se
+agregan en esta entrega.
 """
 
 from __future__ import annotations
@@ -89,11 +88,14 @@ class RFPMetadataRecord(SQLModel, table=True):
 
 
 class RFPDepartmentSection(SQLModel, table=True):
-    """Uno por `(ticket_id, department_id)` -- `key_aspects` es el único
-    campo que Parte 1 llena; `draft_content`/`evaluation_results`/
-    `approval_status`/`approver`/`approved_at` quedan `None` hasta las
-    Partes 2 y 3 (la tabla ya los define, per CONTEXT9.md Sección 2.3, para
-    que esas partes no necesiten una migración nueva)."""
+    """Uno por `(ticket_id, department_id)`. `key_aspects` lo llena la
+    Parte 1; `draft_content`/`evaluation_results` la Parte 2 (que también
+    usa `approval_status="needs_human_review"` cuando se agota el límite
+    de iteraciones del ciclo generador-evaluador). La Parte 3 vuelve a
+    escribir `approval_status` con la decisión real
+    (`"approved"`/`"rejected_final"`/`"pending"`) + `approver` (el
+    responsable fijo de `departments.py`) + `approved_at` cuando
+    corresponde."""
 
     __tablename__ = "rfp_department_sections"
 
@@ -106,6 +108,44 @@ class RFPDepartmentSection(SQLModel, table=True):
     approval_status: str | None = None
     approver: str | None = None
     approved_at: datetime | None = None
+
+
+class FinalDocument(SQLModel, table=True):
+    """`CONTEXT9.md` Sección 2.3 -- uno por ticket (1:1), generado solo
+    cuando TODOS los `departments_needed` terminan en `approval_status ==
+    "approved"` (`pipeline.py::process_rfp_approval`). `sections` es un
+    snapshot de los `draft_content` aprobados en el momento del cierre
+    (no una referencia viva a `RFPDepartmentSection` -- el documento final
+    no debe cambiar si alguien edita una sección después)."""
+
+    __tablename__ = "rfp_final_documents"
+
+    id: int | None = SQLField(default=None, primary_key=True)
+    ticket_id: int = SQLField(foreign_key="rfp_tickets.id", index=True, unique=True)
+    sections: dict[str, Any] = SQLField(default_factory=dict, sa_column=Column(JSONB, nullable=False))
+    currency: str
+    generated_at: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class RFPNodeTrace(SQLModel, table=True):
+    """Hito 9 Parte 3, "Guardrails y control de flujo": "Registra en el
+    estado, para cada ejecución de nodo, el agente, el input, el output y
+    el timestamp (trazabilidad)". Se persiste en Postgres (no solo en el
+    estado efímero de LangGraph) para que la traza sobreviva más allá de
+    una ejecución del grafo y sea consultable (`GET
+    /rfp/tickets/{id}/trace`) -- append-only, nunca se actualiza una fila
+    existente."""
+
+    __tablename__ = "rfp_node_traces"
+
+    id: int | None = SQLField(default=None, primary_key=True)
+    ticket_id: int = SQLField(foreign_key="rfp_tickets.id", index=True)
+    department_id: str | None = None
+    node_name: str
+    agent: str
+    input: dict[str, Any] = SQLField(default_factory=dict, sa_column=Column(JSONB, nullable=False))
+    output: dict[str, Any] | None = SQLField(default=None, sa_column=Column(JSONB))
+    timestamp: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
 
 
 def get_rfp_database_url() -> str:
@@ -126,7 +166,7 @@ def get_session() -> Generator[Session, None, None]:
 
 
 def create_tables() -> None:
-    """Crea las 3 tablas si no existen -- equivalente de `CONTEXT9.md` al
+    """Crea las tablas si no existen -- equivalente de `CONTEXT9.md` al
     `SQLModel.metadata.create_all()` que `services/incidents-api/main.py`
     ya corre en su propio startup, pero acotado a las tablas de este
     módulo (`SQLModel.metadata.create_all()` sin filtro crearía también las
@@ -140,5 +180,7 @@ def create_tables() -> None:
             RFPTicket.__table__,
             RFPMetadataRecord.__table__,
             RFPDepartmentSection.__table__,
+            FinalDocument.__table__,
+            RFPNodeTrace.__table__,
         ],
     )
