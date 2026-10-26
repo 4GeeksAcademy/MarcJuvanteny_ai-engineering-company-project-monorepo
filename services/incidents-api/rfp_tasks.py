@@ -17,9 +17,19 @@ from __future__ import annotations
 import rfp_pipeline_path  # noqa: F401
 
 from celery_app import celery_app
-from rfp_intake.pipeline import process_rfp_ticket
+from rfp_intake.pipeline import process_rfp_generation, process_rfp_ticket
 
 
 @celery_app.task(name="rfp_tasks.process_rfp_ticket_task")
 def process_rfp_ticket_task(ticket_id: int) -> dict:
     return process_rfp_ticket(ticket_id)
+
+
+@celery_app.task(name="rfp_tasks.process_rfp_generation_task")
+def process_rfp_generation_task(ticket_id: int) -> dict:
+    """Hito 9 Parte 2 -- generación por departamento + evaluación en
+    paralelo, misma convención de la tarea de Parte 1: el estado real vive
+    en `RFPTicket.status`/`RFPDepartmentSection`, no en el resultado de
+    Celery."""
+
+    return process_rfp_generation(ticket_id)
