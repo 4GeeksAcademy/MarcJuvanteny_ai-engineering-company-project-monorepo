@@ -29,7 +29,7 @@ from models import UserWithProfileRecord
 import rfp_pipeline_path  # noqa: F401
 from rfp_intake.models import RFPTicket, TicketStatus, get_sql_engine
 from rfp_intake.pipeline import get_ticket_with_metadata
-from rfp_tasks import process_rfp_ticket_task
+from rfp_tasks import process_rfp_generation_task, process_rfp_ticket_task
 from sqlmodel import Session, select
 
 router = APIRouter(prefix="/rfp", tags=["rfp"])
@@ -94,6 +94,32 @@ async def get_rfp_ticket(
     if result is None:
         raise HTTPException(status_code=404, detail="Ticket not found.")
     return result
+
+
+@router.post("/tickets/{ticket_id}/generate", status_code=status.HTTP_202_ACCEPTED)
+async def generate_rfp_sections(
+    ticket_id: int,
+    current_user: UserWithProfileRecord = Depends(get_current_rfp_user),
+) -> dict[str, Any]:
+    """Hito 9 Parte 2 -- dispara generación + evaluación por departamento
+    (ver `rfp_tasks.py::process_rfp_generation_task`) para un ticket que ya
+    completó la Parte 1 (`analisis_completo`). Mismo patrón que
+    `upload_rfp`: valida lo mínimo, encola, responde rápido -- la lógica de
+    agentes vive en `rfp_intake.pipeline`, nunca acá."""
+
+    _ = current_user
+    with Session(get_sql_engine()) as session:
+        ticket = session.get(RFPTicket, ticket_id)
+        if ticket is None:
+            raise HTTPException(status_code=404, detail="Ticket not found.")
+        if ticket.status != TicketStatus.ANALISIS_COMPLETO.value:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Ticket is in status '{ticket.status}', expected '{TicketStatus.ANALISIS_COMPLETO.value}'.",
+            )
+
+    process_rfp_generation_task.delay(ticket_id)
+    return {"ticket_id": ticket_id, "status": TicketStatus.ANALISIS_COMPLETO.value, "queued": True}
 
 
 @router.get("/tickets")
