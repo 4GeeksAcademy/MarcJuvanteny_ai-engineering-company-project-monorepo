@@ -945,3 +945,142 @@ body {
     animation: none;
   }
 }
+
+/* Hito 10 Parte 2 (CONTEXT10.md): chat por WebSocket con el First-line CX
+   agent. Solo tokens de :root (modo oscuro automatico). */
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.chat-connection-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  padding: 0.2rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.chat-connection-pill::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.chat-connection-pill[data-state="open"] {
+  color: var(--ok);
+}
+
+.chat-connection-pill[data-state="reconnecting"],
+.chat-connection-pill[data-state="unauthorized"] {
+  color: var(--warn);
+}
+
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 16rem;
+  max-height: 60dvh;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.85rem;
+  background: var(--background);
+}
+
+.chat-message {
+  max-width: min(85%, 42rem);
+  border-radius: 12px;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.chat-message-user {
+  align-self: flex-end;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.chat-message-assistant {
+  align-self: flex-start;
+}
+
+.chat-message[data-status="interrupted"] {
+  border-style: dashed;
+  border-color: var(--warn);
+}
+
+.chat-message[data-status="interrupted"] .chat-message-text {
+  color: var(--muted);
+}
+
+.chat-message-text {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.chat-message-tag {
+  display: inline-block;
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--warn);
+}
+
+.chat-caret {
+  display: inline-block;
+  width: 0.5ch;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: chat-caret-blink 1s steps(2, start) infinite;
+}
+
+.chat-composer {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.chat-composer textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.chat-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+@keyframes chat-caret-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-caret {
+    animation: none;
+  }
+}

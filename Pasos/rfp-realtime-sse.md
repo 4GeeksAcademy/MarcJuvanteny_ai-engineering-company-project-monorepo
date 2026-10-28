@@ -245,7 +245,8 @@ en `http://localhost:3000/rfp` con DevTools → Network abierto.
 
 ```
 $ cd services/incidents-api && uv run --group dev pytest ../../tests/services -q
-10 passed                         (3 corridas seguidas, estable)
+10 passed, 1 skipped              (3 corridas seguidas, estable; el skip es
+                                  test_chat_websocket.py, que corre con el venv de knowledge-api)
 
 $ cd data/pipelines && .venv/bin/python -m pytest ../../tests/pipelines/test_rfp_*.py -q
 63 passed                         (61 de Hito 9 sin cambios + 2 nuevos)

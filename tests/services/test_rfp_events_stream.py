@@ -27,9 +27,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
 import pytest
-import uvicorn
+
+# Corre con el venv de services/incidents-api; en otro venv se salta entero.
+pytest.importorskip("tinydb")
+pytest.importorskip("celery")
+
+import httpx  # noqa: E402
+import uvicorn  # noqa: E402
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 SERVICE_DIR = ROOT_DIR / "services" / "incidents-api"

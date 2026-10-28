@@ -214,14 +214,16 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
+from collections.abc import AsyncIterator, Awaitable
 from typing import Any, Callable, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 import pipeline_path  # noqa: F401  (efecto secundario: agrega data/pipelines/ a sys.path)
-from rag import generate_answer, retrieve
+from rag import astream_answer, generate_answer, retrieve
 from intent_extraction import extract_incident_query, extract_inventory_query
 from mcp_client import call_mcp_tool
 from memory_decision import MemoryDecision, classify_memory_decision
@@ -548,8 +550,17 @@ def _make_generate_node(
     generate_fn: Callable[[str, list[dict[str, Any]]], str],
     sanitize_fn: Callable[[list[dict[str, Any]]], tuple[list[dict[str, Any]], bool]] = sanitize_external_content,
     audit_fn: Callable[..., None] = record_guardrail_event,
-) -> Callable[[AgentState], dict[str, Any]]:
-    def generate_node(state: AgentState) -> dict[str, Any]:
+    astream_generate_fn: Callable[[str, list[dict[str, Any]]], AsyncIterator[str]] | None = None,
+) -> Callable[[AgentState], Any]:
+    """`astream_generate_fn` (Hito 10 Parte 2, chat por WebSocket): si se
+    pasa, el nodo pasa a ser async y emite cada token por el canal
+    `stream_mode="custom"` de LangGraph (`get_stream_writer()`) a medida que
+    llega, además de devolver la respuesta completa en `answer` -- el resto
+    del grafo (`output_guard`, `propose_memory`) la ve exactamente igual que
+    antes. Misma sanitización y auditoría en las dos variantes: solo cambia
+    el canal, nunca la lógica del agente."""
+
+    def prepare_chunks(state: AgentState) -> list[dict[str, Any]]:
         context = list(state.get("context") or [])
         memory_context = list(state.get("memory_context") or [])
         tool_chunks = _tool_result_to_context_chunks(state.get("tool_result"))
@@ -564,10 +575,20 @@ def _make_generate_node(
                 question=state["question"],
                 thread_id=state.get("thread_id", ""),
             )
+        return sanitized_chunks
 
-        return {"answer": generate_fn(state["question"], sanitized_chunks)}
+    def generate_node(state: AgentState) -> dict[str, Any]:
+        return {"answer": generate_fn(state["question"], prepare_chunks(state))}
 
-    return generate_node
+    async def astream_generate_node(state: AgentState) -> dict[str, Any]:
+        write = get_stream_writer()
+        parts: list[str] = []
+        async for token in astream_generate_fn(state["question"], prepare_chunks(state)):
+            parts.append(token)
+            write({"token": token})
+        return {"answer": "".join(parts)}
+
+    return astream_generate_node if astream_generate_fn is not None else generate_node
 
 
 def _make_output_guard_node(
@@ -671,6 +692,13 @@ def _default_generate_with_agent_prompt(question: str, context: list[dict[str, A
     return generate_answer(question, context, system_prompt=AGENT_SYSTEM_PROMPT)
 
 
+def astream_generate_with_agent_prompt(question: str, context: list[dict[str, Any]]) -> AsyncIterator[str]:
+    """Versión en streaming del default de arriba (Hito 10 Parte 2): mismo
+    `AGENT_SYSTEM_PROMPT`, mismo prompt, tokens a medida que llegan."""
+
+    return astream_answer(question, context, system_prompt=AGENT_SYSTEM_PROMPT)
+
+
 def build_graph(
     retrieve_fn: Callable[[str], list[dict[str, Any]]] = retrieve,
     generate_fn: Callable[[str, list[dict[str, Any]]], str] = _default_generate_with_agent_prompt,
@@ -686,6 +714,7 @@ def build_graph(
     validate_output_fn: Callable[[str], GuardrailResult | None] = validate_output,
     guardrail_audit_fn: Callable[..., None] = record_guardrail_event,
     checkpointer: Any = None,
+    astream_generate_fn: Callable[[str, list[dict[str, Any]]], AsyncIterator[str]] | None = None,
 ) -> CompiledStateGraph:
     """Arma y compila el grafo. Todas las funciones de negocio son
     inyectables para poder probar el enrutamiento y el contrato de nodos
@@ -712,7 +741,10 @@ def build_graph(
     graph.add_node("retrieve", _make_retrieve_node(retrieve_fn))
     graph.add_node("incidents_tool", _make_incidents_tool_node(incidents_tool_fn))
     graph.add_node("inventory_tool", _make_inventory_tool_node(inventory_tool_fn))
-    graph.add_node("generate", _make_generate_node(generate_fn, sanitize_external_content_fn, guardrail_audit_fn))
+    graph.add_node(
+        "generate",
+        _make_generate_node(generate_fn, sanitize_external_content_fn, guardrail_audit_fn, astream_generate_fn),
+    )
     graph.add_node("no_context", _no_context_node)
     graph.add_node("empty_question", _empty_question_node)
     graph.add_node("tool_failed", _tool_failed_node)
@@ -798,6 +830,8 @@ async def run_agent(
     validate_output_fn: Callable[[str], GuardrailResult | None] = validate_output,
     guardrail_audit_fn: Callable[..., None] = record_guardrail_event,
     checkpointer: Any = None,
+    astream_generate_fn: Callable[[str, list[dict[str, Any]]], AsyncIterator[str]] | None = None,
+    on_token: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[AgentState, list[dict[str, Any]], str]:
     """Corre el grafo de punta a punta. Devuelve `(estado_final, trace, thread_id)`.
 
@@ -821,6 +855,13 @@ async def run_agent(
     el orden en que LangGraph ejecutó los nodos (`stream_mode="updates"`),
     guardada en disco para poder consultarla después de la corrida — y
     muestra con claridad si se usó el RAG, una tool, o ambos.
+
+    `astream_generate_fn` + `on_token` (Hito 10 Parte 2, chat por
+    WebSocket -- `chat_runner.py`): el grafo corre además con
+    `stream_mode="custom"` y cada token que `generate` emite se entrega a
+    `on_token` en cuanto llega. Cancelar la tarea que espera a
+    `run_agent()` cancela el `astream` y, con él, el stream del LLM. Sin
+    estos parámetros (`POST /agent/query`) todo queda exactamente igual.
     """
     compiled_graph = build_graph(
         retrieve_fn=retrieve_fn,
@@ -837,6 +878,7 @@ async def run_agent(
         validate_output_fn=validate_output_fn,
         guardrail_audit_fn=guardrail_audit_fn,
         checkpointer=checkpointer or _DEFAULT_CHECKPOINTER,
+        astream_generate_fn=astream_generate_fn,
     )
     thread_id = thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
@@ -844,11 +886,15 @@ async def run_agent(
     trace: list[dict[str, Any]] = []
     final_state: dict[str, Any] = {"question": question, "thread_id": thread_id}
 
-    async for update in compiled_graph.astream(
+    async for mode, update in compiled_graph.astream(
         {"question": question, "thread_id": thread_id, "authorized_order_ids": authorized_order_ids},
         config=config,
-        stream_mode="updates",
+        stream_mode=["updates", "custom"],
     ):
+        if mode == "custom":
+            if on_token is not None and isinstance(update, dict) and "token" in update:
+                await on_token(update["token"])
+            continue
         for node_name, partial_state in update.items():
             # LangGraph representa un nodo que no cambio nada del estado
             # (p. ej. `propose_memory` cuando no hay nada memorable, que

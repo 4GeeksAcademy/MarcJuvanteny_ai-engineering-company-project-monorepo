@@ -1,98 +1,118 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 
-import { queryKnowledgeBase } from "@/lib/knowledge";
+import { ChatConnectionState, useCxChat } from "@/lib/use-cx-chat";
 
 const EXAMPLE_QUESTIONS = [
+  "¿Dónde está mi pedido?",
   "¿Cuál es la ventana de devolución estándar?",
   "¿Qué transportista cubre mejor Aragón rural?",
-  "¿Se puede prometer el SLA estándar durante el Black Friday?",
 ];
 
+function connectionLabel(state: ChatConnectionState) {
+  if (state.status === "open") return "Conectado";
+  if (state.status === "connecting") return "Conectando...";
+  if (state.status === "unauthorized") return "Sin sesion -- vuelve a iniciar sesion";
+  return `Reconectando en ${Math.ceil(state.retryInMs / 1000)}s (intento ${state.attempt})`;
+}
+
+// Hito 10 Parte 2 (CONTEXT10.md): chat con el First-line CX agent por
+// WebSocket -- la respuesta se pinta token a token, se puede interrumpir
+// (botón "Detener" o escribiendo un mensaje nuevo mientras responde) y la
+// conversación se restaura sola al reconectar.
 export function KnowledgeQueryPanel() {
-  const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { messages, connection, isGenerating, notice, send, stop } = useCxChat();
+  const [draft, setDraft] = useState("");
+  const listEndRef = useRef<HTMLDivElement | null>(null);
+  const isOpen = connection.status === "open";
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const trimmed = question.trim();
-    if (!trimmed || isSubmitting) {
-      return;
-    }
+  useEffect(() => {
+    listEndRef.current?.scrollIntoView({ block: "end" });
+  }, [messages]);
 
-    setIsSubmitting(true);
-    setError(null);
-    // No dejamos la respuesta anterior visible mientras carga la nueva --
-    // una respuesta vieja junto a un spinner puede leerse como si ya
-    // respondiera la pregunta nueva.
-    setAnswer(null);
+  function submit(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    if (send(draft)) setDraft("");
+  }
 
-    try {
-      const result = await queryKnowledgeBase(trimmed);
-      setAnswer(result);
-    } catch (submitError) {
-      setError(
-        submitError instanceof Error
-          ? submitError.message
-          : "No se pudo conectar con la base de conocimiento."
-      );
-    } finally {
-      setIsSubmitting(false);
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submit();
     }
   }
 
   return (
-    <div className="knowledge-layout">
-      <div className="card knowledge-form-card">
-        <p className="panel-title">Preguntale a la base de conocimiento</p>
-        <form onSubmit={handleSubmit} className="knowledge-form">
-          <label className="field-block field-block-wide">
-            <span>Pregunta del cliente</span>
-            <textarea
-              value={question}
-              onChange={(event) => setQuestion(event.target.value)}
-              placeholder="Ej: ¿cuál es la ventana de devolución estándar?"
-              rows={3}
-              disabled={isSubmitting}
-            />
-          </label>
-
-          <div className="knowledge-examples">
-            <span>Ejemplos:</span>
-            {EXAMPLE_QUESTIONS.map((example) => (
-              <button
-                key={example}
-                type="button"
-                className="knowledge-example-chip"
-                onClick={() => setQuestion(example)}
-                disabled={isSubmitting}
-              >
-                {example}
-              </button>
-            ))}
-          </div>
-
-          <button type="submit" className="primary-button" disabled={isSubmitting || !question.trim()}>
-            {isSubmitting ? "Consultando…" : "Preguntar"}
-          </button>
-        </form>
+    <div className="card chat-panel">
+      <div className="section-header-row">
+        <p className="panel-title">Agente de atencion al cliente</p>
+        <span className="chat-connection-pill" data-state={connection.status} role="status">
+          {connectionLabel(connection)}
+        </span>
       </div>
 
-      <div className="card knowledge-answer-card" aria-live="polite">
-        <p className="panel-title">Respuesta</p>
+      <div className="chat-messages" aria-live="polite">
+        {messages.length === 0 ? (
+          <p className="knowledge-status">Escribe una pregunta: seguimiento de pedidos, devoluciones o dudas frecuentes.</p>
+        ) : (
+          messages.map((message) => (
+            <div
+              key={message.message_id}
+              className={`chat-message chat-message-${message.role}`}
+              data-status={message.status}
+            >
+              <p className="chat-message-text">
+                {message.text}
+                {message.status === "streaming" ? <span className="chat-caret" aria-hidden="true" /> : null}
+              </p>
+              {message.status === "interrupted" ? <span className="chat-message-tag">Interrumpida</span> : null}
+            </div>
+          ))
+        )}
+        <div ref={listEndRef} />
+      </div>
 
-        {isSubmitting ? <p className="knowledge-status">Buscando en la base de conocimiento…</p> : null}
+      {notice ? <p className="feedback-error">{notice}</p> : null}
 
-        {!isSubmitting && error ? <p className="feedback-error">{error}</p> : null}
+      <form onSubmit={submit} className="chat-composer">
+        <textarea
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={
+            isGenerating
+              ? "Escribe para interrumpir y redirigir la respuesta..."
+              : "Ej: ¿cuál es la ventana de devolución estándar?"
+          }
+          rows={2}
+          disabled={!isOpen}
+        />
+        <div className="chat-composer-actions">
+          {isGenerating ? (
+            <button type="button" className="secondary-button" onClick={stop} disabled={!isOpen}>
+              Detener
+            </button>
+          ) : null}
+          <button type="submit" className="primary-button" disabled={!isOpen || !draft.trim()}>
+            {isGenerating ? "Interrumpir y enviar" : "Enviar"}
+          </button>
+        </div>
+      </form>
 
-        {!isSubmitting && !error && answer ? <p className="knowledge-answer">{answer}</p> : null}
-
-        {!isSubmitting && !error && !answer ? (
-          <p className="knowledge-status">Escribí una pregunta y presioná &quot;Preguntar&quot; para ver la respuesta acá.</p>
-        ) : null}
+      <div className="knowledge-examples">
+        <span>Ejemplos:</span>
+        {EXAMPLE_QUESTIONS.map((example) => (
+          <button
+            key={example}
+            type="button"
+            className="knowledge-example-chip"
+            onClick={() => setDraft(example)}
+            disabled={!isOpen}
+          >
+            {example}
+          </button>
+        ))}
       </div>
     </div>
   );

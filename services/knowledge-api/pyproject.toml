@@ -16,6 +16,9 @@ dependencies = [
     "langgraph>=1.2.12",
     "langchain-mcp-adapters>=0.3.2",
     "redis>=5.0.0,<6.0.0",
+    # Hito 10 Parte 2: verifica el JWT del backoffice en el chat por WebSocket
+    # (chat_auth.py) -- mismo PyJWT que services/incidents-api.
+    "PyJWT>=2.9.0,<3.0.0",
 ]
 
 [tool.setuptools]
@@ -32,6 +35,10 @@ py-modules = [
     "memory_audit",
     "guardrails",
     "guardrail_audit",
+    "chat_auth",
+    "chat_pubsub",
+    "chat_runner",
+    "chat_sessions",
 ]
 packages = ["routers"]
 

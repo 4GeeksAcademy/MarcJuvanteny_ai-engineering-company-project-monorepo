@@ -51,6 +51,7 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
+from collections.abc import AsyncIterator
 from typing import Any, Callable
 
 from dotenv import load_dotenv
@@ -172,6 +173,41 @@ def generate_answer(
         ],
     )
     return response.choices[0].message.content
+
+
+async def astream_answer(
+    question: str,
+    context: list[dict[str, Any]],
+    generation_client: Any = None,
+    system_prompt: str | None = None,
+) -> AsyncIterator[str]:
+    """Variante en streaming de `generate_answer()` -- mismo modelo, mismo
+    prompt (`_build_prompt`), mismo `system_prompt`; solo cambia el canal:
+    devuelve los tokens a medida que el LLM los produce (Hito 10 Parte 2,
+    chat por WebSocket). Async a propósito: si quien consume cancela la
+    tarea (el usuario interrumpe), la cancelación corta el `async for` y
+    cierra el stream HTTP del modelo -- no sigue generando en un hilo
+    huérfano."""
+    from openai import AsyncOpenAI
+
+    client = generation_client or AsyncOpenAI(
+        base_url=os.environ.get("GENERATION_API_BASE") or None,
+        api_key=os.environ.get("GENERATION_API_KEY", ""),
+    )
+    stream = await client.chat.completions.create(
+        model=GENERATION_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
+            {"role": "user", "content": _build_prompt(question, context)},
+        ],
+        stream=True,
+    )
+    try:
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+    finally:
+        await stream.close()
 
 
 def query(

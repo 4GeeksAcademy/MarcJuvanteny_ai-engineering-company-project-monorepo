@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers.agent import router as agent_router
+from routers.chat import router as chat_router
 from routers.knowledge import router as knowledge_router
 
 app = FastAPI(title="Knowledge API", version="0.1.0")
@@ -35,6 +36,7 @@ app.add_middleware(
 
 app.include_router(knowledge_router)
 app.include_router(agent_router)
+app.include_router(chat_router)
 
 
 @app.get("/health")

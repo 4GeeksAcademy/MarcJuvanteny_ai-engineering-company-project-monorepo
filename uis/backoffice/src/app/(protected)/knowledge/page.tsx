@@ -6,7 +6,7 @@ export default function KnowledgePage() {
     <BackofficeShell
       activeKey="knowledge"
       title="Base de conocimiento"
-      subtitle="Preguntale al asistente de ventas de TrackFlow — SLA, devoluciones, transportistas y tarifas de almacenamiento."
+      subtitle="Chatea en tiempo real con el agente de primera linea de TrackFlow — seguimiento, devoluciones y preguntas frecuentes."
     >
       <KnowledgeQueryPanel />
     </BackofficeShell>
