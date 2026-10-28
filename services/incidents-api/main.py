@@ -64,6 +64,7 @@ from models import (
 from password_reset_service import confirm_password_reset, request_password_reset
 from routers.inventory import router as inventory_router, seed_inventory_if_empty
 from routers.rfp import router as rfp_router
+from routers.rfp_events import router as rfp_events_router
 from routers.telemetry import router as telemetry_router
 from tasks import analyze_incidents_csv_task
 from user_service import (
@@ -113,6 +114,7 @@ app.add_middleware(
 app.include_router(inventory_router)
 app.include_router(telemetry_router)
 app.include_router(rfp_router)
+app.include_router(rfp_events_router)
 
 
 @app.on_event("startup")

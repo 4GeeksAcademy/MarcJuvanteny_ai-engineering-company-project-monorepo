@@ -27,6 +27,11 @@ dependencies = [
     "langgraph-checkpoint-postgres>=3.2.0",
 ]
 
+[dependency-groups]
+# Tests del endpoint SSE (tests/services/) -- corren contra este venv porque
+# importan el servicio real (auth_service, routers/rfp_events.py).
+dev = ["pytest>=8.0.0"]
+
 [project.scripts]
 seed = "seed:main"
 

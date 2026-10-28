@@ -174,6 +174,9 @@ def create_tables() -> None:
     comparten el registro de metadata del proceso que lo ejecuta -- acá se
     pasa `tables=` explícito para evitar ese efecto secundario)."""
 
+    # Import local: `events.py` importa este módulo (RFPTicket/RFPMetadataRecord).
+    from .events import RFPTicketEvent
+
     SQLModel.metadata.create_all(
         get_sql_engine(),
         tables=[
@@ -182,5 +185,6 @@ def create_tables() -> None:
             RFPDepartmentSection.__table__,
             FinalDocument.__table__,
             RFPNodeTrace.__table__,
+            RFPTicketEvent.__table__,
         ],
     )

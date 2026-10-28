@@ -847,3 +847,101 @@ body {
   line-height: 1.55;
   white-space: pre-wrap;
 }
+
+/* Hito 10 Parte 1 (CONTEXT10.md): notificacion en tiempo real de tickets de
+   RFP nuevos (stream SSE). Solo tokens de :root, asi que el modo oscuro sale
+   gratis. */
+.rfp-live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  padding: 0.2rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.rfp-live-pill::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.rfp-live-pill[data-state="open"] {
+  color: var(--ok);
+}
+
+.rfp-live-pill[data-state="open"]::before {
+  animation: rfp-live-dot 2s ease-in-out infinite;
+}
+
+.rfp-live-pill[data-state="reconnecting"],
+.rfp-live-pill[data-state="unauthorized"] {
+  color: var(--warn);
+}
+
+.rfp-arrival-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  border: 1px solid var(--accent);
+  border-left-width: 4px;
+  border-radius: 12px;
+  padding: 0.7rem 0.95rem;
+  background: var(--accent-soft);
+  color: var(--ink);
+  animation: rfp-arrival-in 260ms ease-out;
+}
+
+.summary-list li.rfp-ticket-new {
+  border-color: var(--accent);
+  border-left-width: 4px;
+  background: var(--accent-soft);
+  animation: rfp-arrival-in 260ms ease-out;
+}
+
+.summary-list li .rfp-new-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.5rem;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--surface);
+  background: var(--accent);
+}
+
+@keyframes rfp-arrival-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes rfp-live-dot {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rfp-arrival-banner,
+  .summary-list li.rfp-ticket-new,
+  .rfp-live-pill[data-state="open"]::before {
+    animation: none;
+  }
+}
