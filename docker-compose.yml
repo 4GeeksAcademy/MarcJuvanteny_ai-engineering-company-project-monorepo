@@ -68,8 +68,13 @@ services:
     # en vez de descartar claves en silencio -- para un broker de tareas,
     # perder un mensaje encolado sin avisar es peor que un error explicito.
     command: redis-server --maxmemory 256mb --maxmemory-policy noeviction
+    # Auditoría OWASP A05 (Pasos/owasp-auditoria-hardening.md): Redis no tiene
+    # contraseña y es el broker de Celery -- solo loopback. Docker publica
+    # puertos con sus propias reglas iptables, POR DELANTE de UFW: el firewall
+    # del host no lo protegería si quedara en 0.0.0.0. Los demás contenedores
+    # llegan por la red interna (redis:6379), no por este puerto.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     networks:
       - trackflow_network
 
@@ -82,8 +87,11 @@ services:
     # cae al broker por defecto (amqp://guest@localhost), verificado con un
     # contenedor real (ver Pasos/incidents-analyze-celery-redis.md).
     command: celery --broker=redis://redis:6379/0 flower --port=5555
+    # Flower no tiene autenticación y muestra los argumentos de cada tarea
+    # (p. ej. el CSV de incidencias completo) y permite revocarlas: solo
+    # loopback (acceso de ops por túnel SSH: ssh -L 5555:127.0.0.1:5555).
     ports:
-      - "5555:5555"
+      - "127.0.0.1:5555:5555"
     depends_on:
       - redis
     networks:
@@ -111,8 +119,9 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.13.4
     ports:
-      - "6333:6333" # REST + dashboard (http://localhost:6333/dashboard)
-      - "6334:6334" # gRPC
+      # Sin API key configurada: solo loopback (mismo motivo que redis).
+      - "127.0.0.1:6333:6333" # REST + dashboard (http://localhost:6333/dashboard)
+      - "127.0.0.1:6334:6334" # gRPC
     volumes:
       - qdrant_storage:/qdrant/storage
     networks:

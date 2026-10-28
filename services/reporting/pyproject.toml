@@ -8,7 +8,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.0,<1.0.0",
     "pydantic>=2.9.0,<3.0.0",
     "python-dotenv>=1.0.1,<2.0.0",
-    "PyJWT>=2.9.0,<3.0.0",
+    "PyJWT>=2.15.0,<3.0.0",
     # Mismas deps que data/pipelines: este servicio importa
     # exec_weekly_inventory_kpis directamente (via sys.path, ver main.py),
     # no como paquete instalado, asi que necesita su propio entorno completo.

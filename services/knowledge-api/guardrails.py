@@ -241,7 +241,15 @@ def check_country_policy_mixing(question: str) -> GuardrailResult | None:
 
 # --- "Guardrails de seguridad (anti-inyección)": autorización por sesión -------------
 
-_ORDER_NUMBER_RE = re.compile(r"(?:pedido|tracking|orden)\s*#?\s*(\d{3,})", re.IGNORECASE)
+# Auditoría OWASP A01 (Pasos/owasp-auditoria-hardening.md): antes solo
+# "pedido|tracking|orden" + dígitos, y solo se miraba el PRIMER número --
+# "pedido número 45821", "order 45821" (la plataforma es bilingüe) o
+# "mi pedido #12345 y el pedido #45821" pasaban sin chequeo.
+_ORDER_NUMBER_RE = re.compile(
+    r"(?:pedido|orden|order|tracking|env[ií]o|shipment|paquete|package|parcel)s?"
+    r"\s*(?:n(?:[º°o]|[uú]mero|umber|um)\.?\s*)?(?:de\s+)?[:#]?\s*(\d{3,})",
+    re.IGNORECASE,
+)
 
 UNAUTHORIZED_TRACKING_MESSAGE = (
     "No puedo confirmar información de ese pedido -- no está asociado a tu sesión actual. "
@@ -265,12 +273,8 @@ def check_unauthorized_tracking_request(question: str, authorized_order_ids: lis
     if authorized_order_ids is None:
         return None
 
-    match = _ORDER_NUMBER_RE.search(question)
-    if match is None:
-        return None
-
-    order_id = match.group(1)
-    if order_id in authorized_order_ids:
+    mentioned = _ORDER_NUMBER_RE.findall(question)
+    if all(order_id in authorized_order_ids for order_id in mentioned):
         return None
 
     return GuardrailResult(

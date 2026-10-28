@@ -37,10 +37,10 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, ConfigDict
 
-from chat_auth import user_id_from_token
+from chat_auth import require_bearer_user, user_id_from_token
 from chat_pubsub import ChatPubSub, channel_for
 from chat_runner import ChatManager
 from chat_sessions import ChatSessionStatus, ChatStore
@@ -67,23 +67,12 @@ class CreateChatSessionRequest(BaseModel):
     client_id: str | None = None
 
 
-def _require_user(authorization: str | None) -> str:
-    scheme, _, token = (authorization or "").partition(" ")
-    user_id = user_id_from_token(token) if scheme.lower() == "bearer" else None
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.", headers={"WWW-Authenticate": "Bearer"}
-        )
-    return user_id
-
-
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
 async def create_chat_session(
     payload: CreateChatSessionRequest | None = None,
-    authorization: str | None = Header(default=None),
+    user_id: str = Depends(require_bearer_user),
     manager: ChatManager = Depends(get_chat_manager),
 ) -> dict[str, Any]:
-    user_id = _require_user(authorization)
     session = manager.store.create_session(user_id=user_id, client_id=payload.client_id if payload else None)
     return session.model_dump(mode="json")
 
@@ -91,10 +80,9 @@ async def create_chat_session(
 @router.post("/sessions/{session_id}/close")
 async def close_chat_session(
     session_id: str,
-    authorization: str | None = Header(default=None),
+    user_id: str = Depends(require_bearer_user),
     manager: ChatManager = Depends(get_chat_manager),
 ) -> dict[str, Any]:
-    user_id = _require_user(authorization)
     session = manager.store.get_session(session_id)
     if session is None or session.user_id != user_id:
         raise HTTPException(status_code=404, detail="Chat session not found.")

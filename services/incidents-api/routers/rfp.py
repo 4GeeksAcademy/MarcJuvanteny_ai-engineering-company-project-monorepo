@@ -66,7 +66,9 @@ async def upload_rfp(
         raise HTTPException(status_code=400, detail="The uploaded file is empty.")
 
     RAW_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    stored_filename = f"{uuid.uuid4()}-{file.filename}"
+    # Auditoría OWASP A03/A01: solo el nombre base del archivo -- un
+    # `filename` como "../../x.pdf" nunca puede salir de RAW_UPLOAD_DIR.
+    stored_filename = f"{uuid.uuid4()}-{Path(file.filename).name}"
     stored_path = RAW_UPLOAD_DIR / stored_filename
     stored_path.write_bytes(content)
 

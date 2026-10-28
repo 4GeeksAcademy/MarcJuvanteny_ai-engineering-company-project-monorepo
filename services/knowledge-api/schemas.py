@@ -16,13 +16,10 @@ class QueryRequest(BaseModel):
     # `resolve_pending_memory_proposal` nunca podía alcanzarse via HTTP.
     # Ignorado por /knowledge/query (sin concepto de hilo/conversación).
     thread_id: str | None = None
-    # Hito 8 Parte 2 (guardrails, solo relevante para /agent/query): los
-    # numeros de pedido/tracking que la sesion que llama puede consultar
-    # legitimamente -- ver guardrails.py::check_unauthorized_tracking_request
-    # y Pasos/agent-guardrails.md "Decisiones" sobre el limite real de no
-    # tener un sistema de autenticacion de sesion conectado a este endpoint
-    # todavia. `None` (el default) desactiva ese guardrail especifico.
-    authorized_order_ids: list[str] | None = None
+    # `authorized_order_ids` YA NO viene del cliente (auditoría OWASP A01,
+    # Pasos/owasp-auditoria-hardening.md): el servidor lo deriva del JWT
+    # (`order_access.py`). Con `extra="forbid"`, mandarlo da 400 en vez de
+    # ignorarse en silencio.
 
 
 class QueryResponse(BaseModel):

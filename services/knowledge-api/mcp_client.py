@@ -56,6 +56,16 @@ MCP_SERVER_TOKEN = os.environ.get("MCP_SERVER_TOKEN", "")
 MCP_TIMEOUT_SECONDS = float(os.environ.get("MCP_TIMEOUT_SECONDS", "8"))
 
 
+# Auditoría OWASP A05/A01 (Pasos/owasp-auditoria-hardening.md): mínimo
+# privilegio del AGENTE, no solo del token. El MCP Server también expone
+# `create_incident_ticket_tool`, `update_incident_status_tool` y
+# `update_inventory_stock_tool`; si `MCP_SERVER_TOKEN` se emitiera con
+# scopes de escritura (`.env.example` dice "como mínimo" los de lectura),
+# el agente podría mutar datos. Esta allowlist lo impide en el cliente,
+# independientemente de los scopes del token -- defensa en profundidad.
+AGENT_ALLOWED_MCP_TOOLS = frozenset({"query_incident_tool", "query_inventory_tool"})
+
+
 def _auth_headers() -> dict[str, str]:
     if not MCP_SERVER_TOKEN:
         return {}
@@ -102,7 +112,13 @@ async def call_mcp_tool(
     scope faltante) se traduce en `{"ok": False, "error": "<mensaje>"}` a
     partir del `ToolMessage(status="error")` que MCP Auth ya documenta (ver
     `mcps/trackflow-mcp/scopes.py`).
+
+    Solo tools de `AGENT_ALLOWED_MCP_TOOLS` (lectura): cualquier otra se
+    rechaza ANTES de abrir conexión con el MCP Server.
     """
+
+    if tool_name not in AGENT_ALLOWED_MCP_TOOLS:
+        return {"ok": False, "error": f"tool_not_allowed_for_agent:{tool_name}"}
 
     try:
         client = client_factory()

@@ -51,6 +51,7 @@ from typing import Any
 
 from chat_pubsub import ChatPubSub, channel_for
 from chat_sessions import ChatMessage, ChatSessionStatus, ChatStore
+from order_access import authorized_order_ids_for
 
 logger = logging.getLogger("chat")
 
@@ -65,12 +66,19 @@ def split_into_tokens(text: str) -> list[str]:
     return _TOKEN_SPLIT.findall(text)
 
 
-async def default_agent_fn(*, question: str, thread_id: str, on_token: Callable[[str], Awaitable[None]]) -> dict[str, Any]:
+async def default_agent_fn(
+    *,
+    question: str,
+    thread_id: str,
+    on_token: Callable[[str], Awaitable[None]],
+    authorized_order_ids: list[str],
+) -> dict[str, Any]:
     from agent_graph import astream_generate_with_agent_prompt, run_agent
 
     state, _trace, _thread_id = await run_agent(
         question,
         thread_id=thread_id,
+        authorized_order_ids=authorized_order_ids,
         astream_generate_fn=astream_generate_with_agent_prompt,
         on_token=on_token,
     )
@@ -175,8 +183,16 @@ class ChatManager:
                 {"message_id": message.message_id, "token": token, "sequence": message.sequence},
             )
 
+        session = self.store.get_session(session_id)
         try:
-            state = await self._agent_fn(question=question, thread_id=session_id, on_token=on_token)
+            # Auditoría OWASP A01: el ACL de pedidos sale del `user_id` de la
+            # sesión (el `sub` del JWT verificado al conectar), nunca del cliente.
+            state = await self._agent_fn(
+                question=question,
+                thread_id=session_id,
+                on_token=on_token,
+                authorized_order_ids=authorized_order_ids_for(session.user_id) if session else [],
+            )
             final_text = state.get("answer") or state.get("error") or ""
         except asyncio.CancelledError:
             raise

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -13,7 +11,10 @@ from dotenv import load_dotenv
 from fastapi import HTTPException, status
 from jwt import InvalidTokenError
 
-from user_service import get_user_by_email, get_user_by_id
+from models import UserCredentialsUpdate
+from password_hashing import needs_rehash
+from password_hashing import verify_password as _verify_password_hash
+from user_service import get_user_by_email, get_user_by_id, update_user
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -60,16 +61,8 @@ def get_reset_token_expire_minutes() -> int:
 
 
 def verify_password(plain_password: str, stored_hash: str) -> bool:
-    if not stored_hash.startswith("sha256$"):
-        return False
-
-    parts = stored_hash.split("$", 2)
-    if len(parts) != 3:
-        return False
-
-    _, salt, expected_digest = parts
-    computed_digest = hashlib.sha256(f"{salt}:{plain_password}".encode("utf-8")).hexdigest()
-    return hmac.compare_digest(computed_digest, expected_digest)
+    # scrypt + compatibilidad con el sha256 heredado -- ver password_hashing.py.
+    return _verify_password_hash(plain_password, stored_hash)
 
 
 def authenticate_user(db_path: Path, email: str, password: str):
@@ -82,6 +75,10 @@ def authenticate_user(db_path: Path, email: str, password: str):
 
     if not verify_password(password, user.hashed_password):
         return None
+
+    if needs_rehash(user.hashed_password):
+        # Migración transparente sha256 -> scrypt en el primer login correcto.
+        update_user(db_path, user.id, UserCredentialsUpdate(password=password))
 
     return user
 

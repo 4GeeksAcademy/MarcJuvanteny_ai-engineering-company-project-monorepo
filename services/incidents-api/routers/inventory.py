@@ -195,8 +195,15 @@ def seed_inventory_if_empty(session: Session) -> None:
     session.commit()
 
 
+# Auditoría OWASP A01 (C3): las lecturas exigen el mismo JWT que las
+# escrituras -- `/orders` expone tracking_number, volúmenes por almacén y el
+# user_uuid del operario, y antes respondía a cualquiera sin token.
 @router.get("/products", response_model=list[SKUResponse])
-def list_products(db: Session = Depends(get_db)) -> list[SKUResponse]:
+def list_products(
+    db: Session = Depends(get_db),
+    current_user: UserWithProfileRecord = Depends(get_current_inventory_user),
+) -> list[SKUResponse]:
+    _ = current_user
     skus = db.exec(select(SKU).order_by(SKU.id)).all()
     return [_build_sku_response(db, sku) for sku in skus]
 
@@ -220,7 +227,12 @@ def create_product(
 
 
 @router.get("/products/{id}", response_model=SKUResponse)
-def get_product(id: int, db: Session = Depends(get_db)) -> SKUResponse:
+def get_product(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: UserWithProfileRecord = Depends(get_current_inventory_user),
+) -> SKUResponse:
+    _ = current_user
     sku = _get_sku_or_404(db, id)
     return _build_sku_response(db, sku)
 
@@ -267,7 +279,11 @@ def create_outbound_order(
 
 
 @router.get("/orders", response_model=list[StockMovementResponse])
-def list_orders(db: Session = Depends(get_db)) -> list[StockMovementResponse]:
+def list_orders(
+    db: Session = Depends(get_db),
+    current_user: UserWithProfileRecord = Depends(get_current_inventory_user),
+) -> list[StockMovementResponse]:
+    _ = current_user
     sku_map = {item.id: item for item in db.exec(select(SKU)).all()}
 
     inbound_rows = db.exec(select(StockEntry).order_by(StockEntry.created_at.desc())).all()

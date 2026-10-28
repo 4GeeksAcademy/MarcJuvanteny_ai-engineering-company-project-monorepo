@@ -5,7 +5,7 @@ description = "TrackFlow incidents and suppliers API utilities"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0,<1.0.0",
-    "PyJWT>=2.9.0,<3.0.0",
+    "PyJWT>=2.15.0,<3.0.0",
     "pydantic>=2.9.0,<3.0.0",
     "python-dotenv>=1.0.1,<2.0.0",
     "python-multipart>=0.0.9,<1.0.0",
@@ -49,6 +49,7 @@ py-modules = [
     "user_service",
     "rfp_pipeline_path",
     "rfp_tasks",
+    "password_hashing",
 ]
 packages = ["routers", "telemetry"]
 

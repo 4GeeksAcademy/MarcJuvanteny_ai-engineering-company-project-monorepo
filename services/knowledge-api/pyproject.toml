@@ -18,7 +18,7 @@ dependencies = [
     "redis>=5.0.0,<6.0.0",
     # Hito 10 Parte 2: verifica el JWT del backoffice en el chat por WebSocket
     # (chat_auth.py) -- mismo PyJWT que services/incidents-api.
-    "PyJWT>=2.9.0,<3.0.0",
+    "PyJWT>=2.15.0,<3.0.0",
 ]
 
 [tool.setuptools]
@@ -39,6 +39,7 @@ py-modules = [
     "chat_pubsub",
     "chat_runner",
     "chat_sessions",
+    "order_access",
 ]
 packages = ["routers"]
 

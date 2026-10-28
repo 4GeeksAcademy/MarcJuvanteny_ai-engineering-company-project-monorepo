@@ -85,10 +85,11 @@ class FakeLLM:
 
 
 def _make_agent_fn(llm: FakeLLM, checkpointer: MemorySaver, *, validate_output_fn=lambda answer: None):
-    async def agent_fn(*, question, thread_id, on_token):
+    async def agent_fn(*, question, thread_id, on_token, authorized_order_ids):
         state, _trace, _ = await agent_graph.run_agent(
             question,
             thread_id=thread_id,
+            authorized_order_ids=authorized_order_ids,
             retrieve_fn=lambda q: [{"source_document": "faq.md", "section": "Devoluciones", "text": "30 días."}],
             classify_fn=lambda q: "rag",
             read_memory_fn=lambda key: None,
@@ -107,6 +108,10 @@ def _make_agent_fn(llm: FakeLLM, checkpointer: MemorySaver, *, validate_output_f
 @pytest.fixture(autouse=True)
 def _no_trace_files(monkeypatch):
     monkeypatch.setattr(agent_graph, "_save_trace", lambda thread_id, trace: None)
+    # Por test, no solo al importar: otro módulo de tests/services puede
+    # fijar un JWT_SECRET_KEY distinto al importarse (chat_auth lo lee en
+    # cada verificación).
+    monkeypatch.setenv("JWT_SECRET_KEY", JWT_SECRET)
 
 
 @pytest.fixture()

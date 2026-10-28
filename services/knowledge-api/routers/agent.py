@@ -20,21 +20,25 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from schemas import AgentQueryResponse, QueryRequest
 
 from agent_graph import run_agent
+from chat_auth import require_bearer_user
 from guardrail_audit import get_summary
+from order_access import authorized_order_ids_for
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 logger = logging.getLogger("agent")
 
 
 @router.post("/query", response_model=AgentQueryResponse)
-async def query_agent(payload: QueryRequest) -> AgentQueryResponse:
+async def query_agent(payload: QueryRequest, user_id: str = Depends(require_bearer_user)) -> AgentQueryResponse:
+    # Auditoría OWASP A01: JWT obligatorio y pedidos autorizados derivados
+    # del servidor (fail-closed), nunca del body.
     try:
         state, _trace, thread_id = await run_agent(
-            payload.question, thread_id=payload.thread_id, authorized_order_ids=payload.authorized_order_ids
+            payload.question, thread_id=payload.thread_id, authorized_order_ids=authorized_order_ids_for(user_id)
         )
     except Exception:
         # Nunca un stack trace crudo al cliente -- el detalle completo va al
@@ -58,5 +62,6 @@ async def query_agent(payload: QueryRequest) -> AgentQueryResponse:
 
 
 @router.get("/guardrails/summary")
-async def guardrails_summary() -> dict[str, Any]:
+async def guardrails_summary(user_id: str = Depends(require_bearer_user)) -> dict[str, Any]:
+    _ = user_id
     return get_summary()

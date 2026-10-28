@@ -16,6 +16,7 @@ from pathlib import Path
 
 import jwt
 from dotenv import load_dotenv
+from fastapi import Header, HTTPException, status
 from jwt import InvalidTokenError
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -37,3 +38,18 @@ def user_id_from_token(token: str | None) -> str | None:
         return None
     subject = payload.get("sub")
     return str(subject) if subject is not None else None
+
+
+def require_bearer_user(authorization: str | None = Header(default=None)) -> str:
+    """Dependencia FastAPI para las rutas HTTP de este servicio (`/chat/*`,
+    `/agent/*`, `/knowledge/*` -- auditoría OWASP A01: antes `/agent/query`
+    y `/knowledge/query` eran anónimos, y por ellos cualquiera llegaba a las
+    tools internas del agente y gastaba LLM). Devuelve el `user_id`."""
+
+    scheme, _, token = (authorization or "").partition(" ")
+    user_id = user_id_from_token(token) if scheme.lower() == "bearer" else None
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.", headers={"WWW-Authenticate": "Bearer"}
+        )
+    return user_id

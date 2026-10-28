@@ -1,0 +1,20 @@
+ERROR    agent:agent.py:42 Fallo al ejecutar el grafo del agente: ¿Dónde está mi pedido?
+ERROR    knowledge:knowledge.py:34 Fallo al resolver la consulta de conocimiento: ¿Cuál es la ventana de devolución?
+ERROR    agent:agent.py:42 Fallo al ejecutar el grafo del agente: pedido #45821
+ERROR    chat:chat_runner.py:185 Fallo del agente en la sesión chat_5f3a6868eccd
+ERROR    chat:chat_runner.py:185 Fallo del agente en la sesión chat_5f3a6868eccd
+FAILED ../../tests/services/test_security_agent.py::test_agent_endpoints_reject_anonymous_callers[post-/agent/query-body0]
+FAILED ../../tests/services/test_security_agent.py::test_agent_endpoints_reject_anonymous_callers[post-/knowledge/query-body1]
+FAILED ../../tests/services/test_security_agent.py::test_agent_endpoints_reject_anonymous_callers[get-/agent/guardrails/summary-None]
+FAILED ../../tests/services/test_security_agent.py::test_client_can_no_longer_choose_its_own_order_acl
+FAILED ../../tests/services/test_security_agent.py::test_order_acl_is_derived_server_side_and_fails_closed
+FAILED ../../tests/services/test_security_agent.py::test_order_acl_blocks_orders_not_owned_by_the_session[\xbfD\xf3nde est\xe1 el pedido n\xfamero 45821?]
+FAILED ../../tests/services/test_security_agent.py::test_order_acl_blocks_orders_not_owned_by_the_session[Where is order 45821?]
+FAILED ../../tests/services/test_security_agent.py::test_order_acl_blocks_orders_not_owned_by_the_session[Estado del env\xedo 45821]
+FAILED ../../tests/services/test_security_agent.py::test_order_acl_blocks_orders_not_owned_by_the_session[Mi pedido 12345 lleg\xf3, \xbfy el pedido 45821?]
+FAILED ../../tests/services/test_security_agent.py::test_websocket_chat_applies_the_order_acl_of_the_session_owner
+FAILED ../../tests/services/test_security_agent.py::test_agent_cannot_invoke_write_tools_even_if_its_token_allows_them[update_incident_status_tool]
+FAILED ../../tests/services/test_security_agent.py::test_agent_cannot_invoke_write_tools_even_if_its_token_allows_them[create_incident_ticket_tool]
+FAILED ../../tests/services/test_security_agent.py::test_agent_cannot_invoke_write_tools_even_if_its_token_allows_them[update_inventory_stock_tool]
+FAILED ../../tests/services/test_security_agent.py::test_agent_read_tools_are_still_allowed
+14 failed, 4 passed in 3.09s

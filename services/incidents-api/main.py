@@ -536,7 +536,18 @@ async def update_incident_status(
 
 
 @app.post("/users", response_model=UserWithProfileRecord, status_code=status.HTTP_201_CREATED)
-async def create_user(payload: UserRegister) -> UserWithProfileRecord:
+async def create_user(
+    payload: UserRegister,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> UserWithProfileRecord:
+    # Auditoría OWASP A01 (Pasos/owasp-auditoria-hardening.md, C1): el alta
+    # sigue siendo pública para el rol base (register-form.tsx), pero un
+    # rol privilegiado solo lo puede asignar un admin autenticado -- antes
+    # cualquiera se registraba con {"role": "admin"} sin token.
+    if payload.role != UserRole.USER:
+        actor = get_current_user(credentials)
+        if actor.role != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="Only admins can create users with a privileged role.")
     return create_user_service(get_suppliers_db_path(), payload)
 
 
