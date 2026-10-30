@@ -85,7 +85,7 @@ class FakeLLM:
 
 
 def _make_agent_fn(llm: FakeLLM, checkpointer: MemorySaver, *, validate_output_fn=lambda answer: None):
-    async def agent_fn(*, question, thread_id, on_token, authorized_order_ids):
+    async def agent_fn(*, question, thread_id, on_token, authorized_order_ids, actor_id=None):
         state, _trace, _ = await agent_graph.run_agent(
             question,
             thread_id=thread_id,

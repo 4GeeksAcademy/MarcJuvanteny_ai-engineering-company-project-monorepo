@@ -22,6 +22,7 @@ from jwt import InvalidTokenError
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 ALGORITHM = "HS256"
+MIN_JWT_SECRET_LENGTH = 32  # mismo mínimo que services/incidents-api/auth_service.py
 
 
 def user_id_from_token(token: str | None) -> str | None:
@@ -31,6 +32,12 @@ def user_id_from_token(token: str | None) -> str | None:
 
     secret = os.environ.get("JWT_SECRET_KEY")
     if not token or not secret:
+        return None
+    # Hito 12 (credenciales): HS256 con un secreto corto se fuerza por
+    # diccionario/fuerza bruta offline a partir de UN token capturado. RFC 7518
+    # §3.2: clave >= tamaño del hash (256 bits). Falla cerrado: sin secreto
+    # válido no se emite ni se acepta ningún token.
+    if len(secret) < MIN_JWT_SECRET_LENGTH:
         return None
     try:
         payload = jwt.decode(token, secret, algorithms=[ALGORITHM])

@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from input_sanitization import MAX_USER_INPUT_CHARS
 
 
 class QueryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    question: str
+    # Hito 12: límite explícito antes de que el texto llegue al modelo
+    # (coste y dilución de instrucciones). La normalización (invisibles,
+    # NFKC) la hace `receive_question` del grafo, común a HTTP y WebSocket.
+    question: str = Field(max_length=MAX_USER_INPUT_CHARS)
     # Hito 8 (memoria, solo relevante para /agent/query): si se omite, el
     # agente arranca un hilo nuevo -- el cliente debe reenviar el
     # `thread_id` de AgentQueryResponse en el siguiente request para que

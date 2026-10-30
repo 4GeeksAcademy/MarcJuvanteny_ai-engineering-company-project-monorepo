@@ -224,6 +224,8 @@ from langgraph.graph.state import CompiledStateGraph
 
 import pipeline_path  # noqa: F401  (efecto secundario: agrega data/pipelines/ a sys.path)
 from rag import astream_answer, generate_answer, retrieve
+from agent_decision_log import write_decisions
+from input_sanitization import normalize_text
 from intent_extraction import extract_incident_query, extract_inventory_query
 from mcp_client import call_mcp_tool
 from memory_decision import MemoryDecision, classify_memory_decision
@@ -281,6 +283,9 @@ class AgentState(TypedDict, total=False):
     authorized_order_ids: list[str] | None  # pedidos que la sesion actual puede consultar (ver guardrails.py)
     guardrail_blocked: bool | None
     guardrail_redirect_suffix: str | None
+    # Hito 12 (trazabilidad, agent_decision_log.py): qué guardrail actuó, para
+    # poder registrar POR QUÉ se bloqueó/redirigió/reemplazó una respuesta.
+    guardrail_name: str | None
 
 
 def classify_intent(question: str) -> str:
@@ -300,7 +305,10 @@ def classify_intent(question: str) -> str:
 
 
 def _receive_question_node(state: AgentState) -> dict[str, Any]:
-    return {"question": (state.get("question") or "").strip()}
+    # Hito 12: normalización explícita ANTES de cualquier guardrail
+    # (input_sanitization.py) -- un carácter invisible o letras de ancho
+    # completo evadían `input_guard`. Punto único para HTTP y WebSocket.
+    return {"question": normalize_text(state.get("question") or "").strip()}
 
 
 def _record_guardrail(result: GuardrailResult, state: AgentState, audit_fn: Callable[..., None]) -> None:
@@ -331,17 +339,17 @@ def _make_input_guard_node(
             result = check_fn(question)
             if result is not None:
                 _record_guardrail(result, state, audit_fn)
-                return {"guardrail_blocked": True, "answer": result.message}
+                return {"guardrail_blocked": True, "answer": result.message, "guardrail_name": result.guardrail_name}
 
         auth_result = check_unauthorized_tracking_request(question, state.get("authorized_order_ids"))
         if auth_result is not None:
             _record_guardrail(auth_result, state, audit_fn)
-            return {"guardrail_blocked": True, "answer": auth_result.message}
+            return {"guardrail_blocked": True, "answer": auth_result.message, "guardrail_name": auth_result.guardrail_name}
 
         casual_result = check_casual_question(question)
         if casual_result is not None:
             _record_guardrail(casual_result, state, audit_fn)
-            return {"guardrail_redirect_suffix": casual_result.message}
+            return {"guardrail_redirect_suffix": casual_result.message, "guardrail_name": casual_result.guardrail_name}
 
         return {}
 
@@ -605,7 +613,7 @@ def _make_output_guard_node(
         result = validate_fn(answer)
         if result is not None:
             _record_guardrail(result, state, audit_fn)
-            return {"answer": result.message}
+            return {"answer": result.message, "guardrail_name": result.guardrail_name}
 
         suffix = state.get("guardrail_redirect_suffix")
         if suffix:
@@ -832,6 +840,8 @@ async def run_agent(
     checkpointer: Any = None,
     astream_generate_fn: Callable[[str, list[dict[str, Any]]], AsyncIterator[str]] | None = None,
     on_token: Callable[[str], Awaitable[None]] | None = None,
+    actor_id: str | None = None,
+    decision_log_fn: Callable[..., None] = write_decisions,
 ) -> tuple[AgentState, list[dict[str, Any]], str]:
     """Corre el grafo de punta a punta. Devuelve `(estado_final, trace, thread_id)`.
 
@@ -885,25 +895,101 @@ async def run_agent(
 
     trace: list[dict[str, Any]] = []
     final_state: dict[str, Any] = {"question": question, "thread_id": thread_id}
+    # Hito 12: qué hizo cada nodo y POR QUÉ (agent_decision_log.py).
+    decisions: list[dict[str, str]] = []
+    completed = False
 
-    async for mode, update in compiled_graph.astream(
-        {"question": question, "thread_id": thread_id, "authorized_order_ids": authorized_order_ids},
-        config=config,
-        stream_mode=["updates", "custom"],
-    ):
-        if mode == "custom":
-            if on_token is not None and isinstance(update, dict) and "token" in update:
-                await on_token(update["token"])
-            continue
-        for node_name, partial_state in update.items():
-            # LangGraph representa un nodo que no cambio nada del estado
-            # (p. ej. `propose_memory` cuando no hay nada memorable, que
-            # devuelve `{}`) como `None` en el stream de "updates" -- no es
-            # un error, es "sin cambios" (descubierto corriendo este
-            # escenario, ver Pasos/).
-            partial_state = partial_state or {}
-            trace.append({"node": node_name, "output": partial_state})
-            final_state.update(partial_state)
+    try:
+        async for mode, update in compiled_graph.astream(
+            {"question": question, "thread_id": thread_id, "authorized_order_ids": authorized_order_ids},
+            config=config,
+            stream_mode=["updates", "custom"],
+        ):
+            if mode == "custom":
+                if on_token is not None and isinstance(update, dict) and "token" in update:
+                    await on_token(update["token"])
+                continue
+            for node_name, partial_state in update.items():
+                # LangGraph representa un nodo que no cambio nada del estado
+                # (p. ej. `propose_memory` cuando no hay nada memorable, que
+                # devuelve `{}`) como `None` en el stream de "updates" -- no es
+                # un error, es "sin cambios" (descubierto corriendo este
+                # escenario, ver Pasos/).
+                partial_state = partial_state or {}
+                trace.append({"node": node_name, "output": partial_state})
+                final_state.update(partial_state)
+                action, reason = _explain_step(node_name, partial_state, final_state)
+                decisions.append({"node": node_name, "action": action, "reason": reason})
+        completed = True
+    finally:
+        if not completed:
+            # Interrupción del usuario (cancelación de la tarea, Hito 10) o fallo:
+            # también queda registrado, con los pasos que alcanzaron a correr.
+            decisions.append({"node": "-", "action": "cancelled", "reason": "turno abortado antes de terminar el grafo"})
+        decision_log_fn(
+            thread_id=thread_id, actor_id=actor_id, question=final_state.get("question") or question, steps=decisions
+        )
 
     _save_trace(thread_id, trace)
     return final_state, trace, thread_id  # type: ignore[return-value]
+
+
+def _matched_keywords(question: str, keywords: tuple[str, ...]) -> list[str]:
+    lowered = question.lower()
+    return [keyword for keyword in keywords if keyword in lowered]
+
+
+def _explain_step(node: str, output: dict[str, Any], state: dict[str, Any]) -> tuple[str, str]:
+    """`(acción, motivo)` legibles para auditoría. Nunca incluye el texto de
+    la pregunta ni de la respuesta (minimización): solo decisiones, conteos,
+    nombres de guardrail/tool y argumentos ya validados."""
+
+    question = state.get("question") or ""
+    guardrail = output.get("guardrail_name")
+    if node == "receive_question":
+        return "input_received", f"{len(question)} caracteres tras normalizar (NFKC, sin invisibles)"
+    if node == "input_guard":
+        if output.get("guardrail_blocked"):
+            return "blocked", f"guardrail de entrada '{guardrail}'"
+        if output.get("guardrail_redirect_suffix"):
+            return "allowed_with_redirect", f"guardrail de entrada '{guardrail}' (pregunta fuera de dominio)"
+        return "allowed", "ningún guardrail de entrada disparó"
+    if node in ("guardrail_blocked", "empty_question"):
+        return "stop", "respuesta del guardrail, sin RAG/tools/LLM" if node == "guardrail_blocked" else "pregunta vacía"
+    if node == "resolve_pending_memory_proposal":
+        record = output.get("memory_decision_record") or {}
+        return "memory_decision", f"propuesta pendiente resuelta como '{record.get('outcome')}'"
+    if node == "classify_intent":
+        route = output.get("route")
+        matched = _matched_keywords(question, _INCIDENT_KEYWORDS + _INVENTORY_KEYWORDS + _POLICY_KEYWORDS)
+        return f"route:{route}", f"palabras clave: {matched}" if matched else "sin palabras clave de tool: RAG por defecto"
+    if node == "retrieve_memory":
+        hits = len(output.get("memory_context") or [])
+        return ("memory_hit" if hits else "memory_miss"), f"{hits} hechos aprobados de memoria"
+    if node == "retrieve":
+        context = output.get("context") or []
+        sources = sorted({str(chunk.get("source_document")) for chunk in context})
+        return "rag_retrieve", f"{len(context)} fragmentos de {sources}"
+    if node in ("incidents_tool", "inventory_tool"):
+        tool_result = output.get("tool_result") or {}
+        args = extract_incident_query(question) if node == "incidents_tool" else extract_inventory_query(question)
+        tool_name = "query_incident_tool" if node == "incidents_tool" else "query_inventory_tool"
+        outcome = "ok" if tool_result.get("ok") else f"error={tool_result.get('error')}"
+        return f"tool_call:{tool_name}", f"args={args} -> {outcome}"
+    if node == "generate":
+        tool_ok = bool((state.get("tool_result") or {}).get("ok"))
+        chunks = len(state.get("context") or []) + len(state.get("memory_context") or []) + (1 if tool_ok else 0)
+        return "llm_generate", f"respuesta del modelo con {chunks} fuentes de contexto (saneadas)"
+    if node == "no_context":
+        return "no_context_answer", "sin fragmentos RAG, memoria ni resultado de tool"
+    if node == "tool_failed":
+        return "tool_failed_answer", f"tool falló: {(state.get('tool_result') or {}).get('error')}"
+    if node == "output_guard":
+        if guardrail:
+            return "output_replaced", f"guardrail de salida '{guardrail}'"
+        return ("output_ok_with_redirect" if output.get("answer") else "output_ok"), "validación de salida sin hallazgos"
+    if node == "propose_memory":
+        if output.get("pending_memory_proposal"):
+            return "memory_proposed", "interacción memorable: se PREGUNTA al usuario, no se escribe"
+        return "no_memory_proposal", "nada memorable"
+    return "step", node

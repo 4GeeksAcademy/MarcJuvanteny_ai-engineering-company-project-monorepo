@@ -44,6 +44,8 @@ from chat_auth import require_bearer_user, user_id_from_token
 from chat_pubsub import ChatPubSub, channel_for
 from chat_runner import ChatManager
 from chat_sessions import ChatSessionStatus, ChatStore
+from input_sanitization import InvalidUserInput, sanitize_user_input
+from rate_limit import RATE_LIMITED_MESSAGE, SlidingWindowRateLimiter, get_model_rate_limiter
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger("chat")
@@ -116,6 +118,7 @@ async def chat_websocket(
     session_id: str | None = Query(default=None),
     token: str | None = Query(default=None),
     manager: ChatManager = Depends(get_chat_manager),
+    limiter: SlidingWindowRateLimiter = Depends(get_model_rate_limiter),
 ) -> None:
     await websocket.accept()
 
@@ -155,6 +158,21 @@ async def chat_websocket(
                 # Al mismo `queue` que el forwarder: un solo escritor del socket.
                 queue.put_nowait(_error(session_id, "Each frame must carry this connection's session_id."))
                 continue
+
+            # Hito 12: todo turno nuevo (un `user_message`, o un
+            # `interrupt_requested` CON `new_input`) es una llamada al modelo:
+            # pasa por límite de longitud y rate limit ANTES de abortar nada.
+            # Detener sin `new_input` no consume: reduce coste.
+            new_text = data.get("text") if event == "user_message" else data.get("new_input")
+            if event in ("user_message", "interrupt_requested") and new_text:
+                try:
+                    sanitize_user_input(str(new_text))
+                except InvalidUserInput as exc:
+                    queue.put_nowait(_error(session_id, str(exc)))
+                    continue
+                if limiter.try_acquire(user_id) is not None:
+                    queue.put_nowait(_error(session_id, RATE_LIMITED_MESSAGE))
+                    continue
 
             if event == "user_message":
                 await manager.submit_user_message(session_id, str(data.get("text") or ""))

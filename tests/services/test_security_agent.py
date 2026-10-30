@@ -198,7 +198,7 @@ def test_websocket_chat_applies_the_order_acl_of_the_session_owner():
 
     llm = SpyLLM()
 
-    async def agent_fn(*, question, thread_id, on_token, authorized_order_ids):
+    async def agent_fn(*, question, thread_id, on_token, authorized_order_ids, actor_id=None):
         state, _trace, _ = await agent_graph.run_agent(
             question,
             thread_id=thread_id,

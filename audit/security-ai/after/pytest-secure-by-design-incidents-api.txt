@@ -1,0 +1,6 @@
+../../tests/services/test_secure_by_design_incidents_api.py::test_delete_supplier_without_explicit_confirmation_deletes_nothing PASSED
+../../tests/services/test_secure_by_design_incidents_api.py::test_delete_supplier_with_explicit_confirmation PASSED
+../../tests/services/test_secure_by_design_incidents_api.py::test_delete_user_requires_explicit_confirmation PASSED
+../../tests/services/test_secure_by_design_incidents_api.py::test_confirmation_never_replaces_authentication PASSED
+../../tests/services/test_secure_by_design_incidents_api.py::test_short_jwt_secret_is_refused_fail_closed PASSED
+============================== 5 passed in 2.01s ===============================

@@ -72,6 +72,7 @@ async def default_agent_fn(
     thread_id: str,
     on_token: Callable[[str], Awaitable[None]],
     authorized_order_ids: list[str],
+    actor_id: str | None = None,
 ) -> dict[str, Any]:
     from agent_graph import astream_generate_with_agent_prompt, run_agent
 
@@ -79,6 +80,7 @@ async def default_agent_fn(
         question,
         thread_id=thread_id,
         authorized_order_ids=authorized_order_ids,
+        actor_id=actor_id,
         astream_generate_fn=astream_generate_with_agent_prompt,
         on_token=on_token,
     )
@@ -192,6 +194,7 @@ class ChatManager:
                 thread_id=session_id,
                 on_token=on_token,
                 authorized_order_ids=authorized_order_ids_for(session.user_id) if session else [],
+                actor_id=session.user_id if session else None,
             )
             final_text = state.get("answer") or state.get("error") or ""
         except asyncio.CancelledError:

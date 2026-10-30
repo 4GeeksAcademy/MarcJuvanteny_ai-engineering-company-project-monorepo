@@ -40,6 +40,9 @@ py-modules = [
     "chat_runner",
     "chat_sessions",
     "order_access",
+    "input_sanitization",
+    "rate_limit",
+    "agent_decision_log",
 ]
 packages = ["routers"]
 
