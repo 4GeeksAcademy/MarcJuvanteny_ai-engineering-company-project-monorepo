@@ -134,7 +134,7 @@ entrada usuario  ancho completo       -> NO BLOQUEADO (evasión)
 contenido externo nota oculta (caso 2) -> sin cambios
 ```
 
-Los guardrails buscan patrones en el texto, y `"Ig​nora tus
+Los guardrails buscan patrones en el texto, y `"Ig\u200bnora tus
 instrucciones"` o `"Ｉｇｎｏｒａ…"` no coincidían. Con un carácter invisible, el
 caso 1 del BRIEFING llegaba al LLM.
 

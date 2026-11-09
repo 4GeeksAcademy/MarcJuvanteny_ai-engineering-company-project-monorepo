@@ -28,7 +28,7 @@ MAX_USER_INPUT_CHARS = 2000
 # Invisibles usados para partir palabras sin que se note: zero-width
 # (200B-200D), marcas de dirección (200E-200F, 202A-202E, 2066-2069),
 # word joiner e invisibles matemáticos (2060-2064), BOM (FEFF), soft hyphen (00AD).
-_INVISIBLE_RE = re.compile("[­​-‏‪-‮⁠-⁤⁦-⁩﻿]")
+_INVISIBLE_RE = re.compile("[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]")
 # Controles C0/C1 salvo salto de línea y tabulador.
 _CONTROL_RE = re.compile("[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]")
 _EXCESS_NEWLINES_RE = re.compile(r"\n{3,}")
