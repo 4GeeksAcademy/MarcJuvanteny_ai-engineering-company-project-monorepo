@@ -831,3 +831,26 @@ vaciado — ver "Decisiones" sobre por qué no se comitea ese directorio).
     establecido en este repo de correr cada archivo con su propia invocación
     de `pytest` ya evitaba este problema sin saberlo; documentado ahora
     explícitamente para no combinarlos por accidente en CI.
+
+## Actualización 2026-11-09: umbral recalibrado con embeddings reales
+
+El punto 2 de "Pendiente" ya está hecho.
+
+**El problema.** Con las credenciales del proxy de 4Geeks, el modelo de embeddings es `perplexity/pplx-embed-v1-0.6b`. Con ese modelo, el umbral de 0.5 hacía que el chat contestara "No tengo información" a preguntas legítimas. Por ejemplo, "Me han pedido la devolución de unas zapatillas, ¿qué tengo que hacer?" sacaba 0.39.
+
+**La medición.**
+
+| Grupo | Similitud | Resultado |
+|---|---|---|
+| `data/eval/test-queries.json` (10 preguntas) | 0.51–0.80 | el chunk esperado sale 1.º en todas |
+| Paráfrasis de usuario | 0.39–0.51 | sección correcta en 1.er lugar |
+| Fuera de dominio | ≤ 0.26 | — |
+
+**La solución.** `DEFAULT_MIN_SCORE` ahora sale de la variable `RAG_MIN_SCORE` (por defecto, 0.5), ya que el umbral depende del modelo. En `services/knowledge-api/.env` se fija en **0.35**.
+
+**Verificación.**
+
+- Chat real:
+  - la pregunta de las zapatillas recibe la política de devoluciones (30 días, ReturnBear o Logística Inversa Iberia) y la petición del número de pedido;
+  - "¿Cuál es la capital de Francia?" sigue rechazándose.
+- 148 tests de knowledge-api pasados.

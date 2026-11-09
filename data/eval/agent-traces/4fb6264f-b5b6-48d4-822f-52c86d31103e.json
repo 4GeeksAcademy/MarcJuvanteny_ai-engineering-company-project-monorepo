@@ -1,0 +1,50 @@
+[
+  {
+    "node": "receive_question",
+    "output": {
+      "question": "¿SEUR cubre la ruta rural de Zaragoza?"
+    }
+  },
+  {
+    "node": "input_guard",
+    "output": {}
+  },
+  {
+    "node": "classify_intent",
+    "output": {
+      "route": "rag"
+    }
+  },
+  {
+    "node": "retrieve_memory",
+    "output": {
+      "memory_context": [
+        {
+          "source_document": "agent-memory",
+          "section": "SEUR:Spain",
+          "text": "SEUR ya no cubre la zona rural de Zaragoza."
+        }
+      ]
+    }
+  },
+  {
+    "node": "retrieve",
+    "output": {
+      "context": []
+    }
+  },
+  {
+    "node": "generate",
+    "output": {
+      "answer": "SEUR ya no cubre la zona rural de Zaragoza."
+    }
+  },
+  {
+    "node": "output_guard",
+    "output": {}
+  },
+  {
+    "node": "propose_memory",
+    "output": {}
+  }
+]

@@ -151,7 +151,7 @@ export function InventoryInboundOrderPanel() {
         <div>
           <div className="eyebrow">Orden de entrada</div>
           <h2 className="panel-title">Registrar recepcion de stock</h2>
-          <p className="analysis-copy">Envia datos a POST /inventory/orders/inbound usando seleccion de producto por nombre.</p>
+          <p className="analysis-copy">Selecciona el producto y registra la recepcion de stock.</p>
         </div>
       </section>
 

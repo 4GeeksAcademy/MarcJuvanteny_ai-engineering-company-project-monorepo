@@ -1,0 +1,49 @@
+[
+  {
+    "node": "receive_question",
+    "output": {
+      "question": "¿Qué hora es en Tokio?"
+    }
+  },
+  {
+    "node": "input_guard",
+    "output": {
+      "guardrail_redirect_suffix": "\n\n(Por si te sirve: puedo ayudarte con el estado de tus envíos, políticas de devolución/SLA, o incidencias de TrackFlow.)",
+      "guardrail_name": "casual_question_redirect"
+    }
+  },
+  {
+    "node": "classify_intent",
+    "output": {
+      "route": "rag"
+    }
+  },
+  {
+    "node": "retrieve_memory",
+    "output": {
+      "memory_context": []
+    }
+  },
+  {
+    "node": "retrieve",
+    "output": {
+      "context": []
+    }
+  },
+  {
+    "node": "no_context",
+    "output": {
+      "answer": "No tengo información sobre eso en la base de conocimiento de TrackFlow."
+    }
+  },
+  {
+    "node": "output_guard",
+    "output": {
+      "answer": "No tengo información sobre eso en la base de conocimiento de TrackFlow.\n\n(Por si te sirve: puedo ayudarte con el estado de tus envíos, políticas de devolución/SLA, o incidencias de TrackFlow.)"
+    }
+  },
+  {
+    "node": "propose_memory",
+    "output": {}
+  }
+]

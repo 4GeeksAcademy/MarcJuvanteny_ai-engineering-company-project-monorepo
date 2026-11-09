@@ -1,0 +1,67 @@
+[
+  {
+    "node": "receive_question",
+    "output": {
+      "question": "Sí, guárdalo. Por cierto, Nacex ya no opera esa ruta desde el mes pasado, hay que usar el carrier local."
+    }
+  },
+  {
+    "node": "input_guard",
+    "output": {}
+  },
+  {
+    "node": "resolve_pending_memory_proposal",
+    "output": {
+      "pending_memory_proposal": null,
+      "memory_decision_record": {
+        "outcome": "approved",
+        "proposal": {
+          "key": "SEUR:Spain",
+          "category": "carrier_rule",
+          "fact": "En realidad SEUR ya no cubre esa zona rural de Zaragoza, hay que usar el carrier local desde el mes pasado.",
+          "reason": "Corrección de regla de asignación para SEUR (Spain)."
+        }
+      }
+    }
+  },
+  {
+    "node": "classify_intent",
+    "output": {
+      "route": "rag"
+    }
+  },
+  {
+    "node": "retrieve_memory",
+    "output": {
+      "memory_context": []
+    }
+  },
+  {
+    "node": "retrieve",
+    "output": {
+      "context": []
+    }
+  },
+  {
+    "node": "no_context",
+    "output": {
+      "answer": "No tengo información sobre eso en la base de conocimiento de TrackFlow."
+    }
+  },
+  {
+    "node": "output_guard",
+    "output": {}
+  },
+  {
+    "node": "propose_memory",
+    "output": {
+      "pending_memory_proposal": {
+        "key": "Nacex:Spain",
+        "category": "carrier_rule",
+        "fact": "Sí, guárdalo. Por cierto, Nacex ya no opera esa ruta desde el mes pasado, hay que usar el carrier local.",
+        "reason": "Corrección de regla de asignación para Nacex (Spain)."
+      },
+      "answer": "No tengo información sobre eso en la base de conocimiento de TrackFlow.\n\n¿Querés que recuerde esto para la próxima? Corrección de regla de asignación para Nacex (Spain)."
+    }
+  }
+]

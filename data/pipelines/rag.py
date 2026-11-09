@@ -43,6 +43,18 @@ razonables por una redacción distinta entre la pregunta y el documento.
 el modelo de embeddings real y mirando la distribución de similitud de los
 chunks correctos vs. incorrectos (documentado también como pendiente en
 `Pasos/rag-knowledge-base-fase1.md`).
+
+**Calibración real (2026-11-09)**, con el modelo de embeddings del proxy de
+4Geeks (`perplexity/pplx-embed-v1-0.6b`), contra `data/eval/test-queries.json`
+y preguntas de control:
+- las 10 preguntas del eval: el chunk esperado sale 1º con 0.51-0.80;
+- paráfrasis reales de usuario ("Me han pedido la devolución de unas
+  zapatillas..."): 0.39-0.51, con la sección correcta en 1er lugar;
+- preguntas fuera de dominio (capital de Francia, receta de paella...): <= 0.26.
+
+Con ese modelo, 0.5 descartaba preguntas legítimas y el agente contestaba
+"No tengo información". El umbral depende del modelo, así que se configura
+con `RAG_MIN_SCORE` (0.35 para el modelo de arriba); si no se define, queda 0.5.
 """
 
 from __future__ import annotations
@@ -80,8 +92,28 @@ COLLECTION_NAME: str = _indexing.COLLECTION_NAME
 embed: Callable[[str], list[float]] = _indexing.embed
 
 GENERATION_MODEL = os.environ.get("GENERATION_MODEL", "gpt-4o-mini")
+
+
+def generation_model() -> str:
+    """`GENERATION_MODEL` leido en el momento de la llamada (mismo motivo que
+    `default_min_score()`): en services/knowledge-api el .env se carga despues
+    de importar este modulo, y la constante se quedaba en "gpt-4o-mini", que
+    el proxy LLM rechaza con 403."""
+    return os.environ.get("GENERATION_MODEL") or GENERATION_MODEL
 DEFAULT_K = 5
-DEFAULT_MIN_SCORE = 0.5  # ver "Umbral minimo de similitud" en el docstring del modulo
+# Ver "Umbral minimo de similitud" en el docstring del modulo: depende del modelo de embeddings.
+DEFAULT_MIN_SCORE = float(os.environ.get("RAG_MIN_SCORE") or 0.5)
+
+
+def default_min_score() -> float:
+    """`RAG_MIN_SCORE` leido en el momento de la llamada, no al importar.
+
+    services/knowledge-api define RAG_MIN_SCORE en SU .env, que se carga
+    (load_dotenv en chat_auth/memory_store/mcp_client) DESPUES de importar este
+    modulo. Leerlo solo al importar dejaba el servicio con 0.5 aunque el .env
+    dijera 0.35, y el agente contestaba "No tengo informacion" a preguntas
+    legitimas."""
+    return float(os.environ.get("RAG_MIN_SCORE") or DEFAULT_MIN_SCORE)
 
 # Voz/audiencia del ticket (CONTEXT7.md Seccion 1): "un asistente que
 # cualquier account manager pueda usar como lo haria un vendedor de
@@ -113,14 +145,17 @@ def retrieve(
     query: str,
     *,
     k: int = DEFAULT_K,
-    min_score: float = DEFAULT_MIN_SCORE,
+    min_score: float | None = None,
     qdrant_client: QdrantClient | None = None,
     embed_fn: Callable[[str], list[float]] = embed,
     collection_name: str = COLLECTION_NAME,
 ) -> list[dict[str, Any]]:
     """Embebe `query`, busca los `k` vecinos más cercanos en Qdrant, y
     devuelve solo los payloads (nunca objetos crudos del SDK) que superan
-    `min_score`. Puede devolver menos de `k` resultados, o ninguno."""
+    `min_score` (por defecto, `default_min_score()`). Puede devolver menos de
+    `k` resultados, o ninguno."""
+    if min_score is None:
+        min_score = default_min_score()
     client = qdrant_client or _qdrant_client()
     vector = embed_fn(query)
 
@@ -192,7 +227,7 @@ def generate_answer(
         api_key=os.environ.get("GENERATION_API_KEY", ""),
     )
     response = client.chat.completions.create(
-        model=GENERATION_MODEL,
+        model=generation_model(),
         messages=[
             {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
             {"role": "user", "content": _build_prompt(question, context)},
@@ -221,7 +256,7 @@ async def astream_answer(
         api_key=os.environ.get("GENERATION_API_KEY", ""),
     )
     stream = await client.chat.completions.create(
-        model=GENERATION_MODEL,
+        model=generation_model(),
         messages=[
             {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
             {"role": "user", "content": _build_prompt(question, context)},

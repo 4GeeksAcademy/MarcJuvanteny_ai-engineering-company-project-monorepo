@@ -177,7 +177,7 @@ export function InventoryOutboundOrderPanel() {
         <div>
           <div className="eyebrow">Orden de salida</div>
           <h2 className="panel-title">Registrar despacho o perdida</h2>
-          <p className="analysis-copy">Envia datos a POST /inventory/orders/outbound usando seleccion de producto por nombre.</p>
+          <p className="analysis-copy">Selecciona el producto y registra un despacho o una perdida de stock.</p>
         </div>
       </section>
 

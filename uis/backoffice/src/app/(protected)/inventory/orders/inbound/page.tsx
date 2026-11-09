@@ -6,7 +6,7 @@ export default function InventoryInboundOrderPage() {
     <BackofficeShell
       activeKey="inventory-products"
       title="Inventario · Orden de entrada"
-      subtitle="Registra recepciones de stock contra POST /inventory/orders/inbound."
+      subtitle="Registra recepciones de stock en el almacen."
     >
       <InventoryInboundOrderPanel />
     </BackofficeShell>

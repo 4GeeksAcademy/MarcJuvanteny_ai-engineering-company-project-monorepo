@@ -1,0 +1,53 @@
+[
+  {
+    "node": "receive_question",
+    "output": {
+      "question": "¿Cuál es la ventana de devolución estándar?"
+    }
+  },
+  {
+    "node": "input_guard",
+    "output": {}
+  },
+  {
+    "node": "classify_intent",
+    "output": {
+      "route": "rag"
+    }
+  },
+  {
+    "node": "retrieve_memory",
+    "output": {
+      "memory_context": []
+    }
+  },
+  {
+    "node": "retrieve",
+    "output": {
+      "context": [
+        {
+          "company": "trackflow",
+          "source_document": "returns-policy",
+          "section": "Ventana de devolución estándar",
+          "language": "es",
+          "chunk_index": 1,
+          "text": "Ventana de devolución estándar\n\n- **30 días naturales** desde la fecha de entrega registrada, salvo que el\n  acuerdo comercial de la marca especifique una ventana distinta.\n- Pasada la ventana, la devolución requiere aprobación manual excepcional\n  del equipo de operaciones — no se procesa por el flujo estándar."
+        }
+      ]
+    }
+  },
+  {
+    "node": "generate",
+    "output": {
+      "answer": "La ventana de devolución estándar es de **30 días naturales** desde la fecha de entrega registrada, a menos que el acuerdo comercial de la marca especifique una ventana diferente. Pasado ese plazo, la devolución requeriría una aprobación manual excepcional del equipo de operaciones.\n\n¿Te gustaría que revise el plazo aplicable a tu pedido en concreto?"
+    }
+  },
+  {
+    "node": "output_guard",
+    "output": {}
+  },
+  {
+    "node": "propose_memory",
+    "output": {}
+  }
+]

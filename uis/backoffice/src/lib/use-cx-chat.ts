@@ -69,7 +69,9 @@ function storeSessionId(sessionId: string | null) {
 }
 
 function websocketUrl(sessionId: string, token: string) {
-  const base = KNOWLEDGE_API_URL.replace(/^http/, "ws");
+  // Con el proxy de next.config.ts la URL es relativa (`/knowledge-backend`):
+  // se resuelve contra la página para obtener ws:// o wss:// del mismo origen.
+  const base = new URL(KNOWLEDGE_API_URL, window.location.href).href.replace(/\/$/, "").replace(/^http/, "ws");
   return `${base}/chat/ws?session_id=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(token)}`;
 }
 

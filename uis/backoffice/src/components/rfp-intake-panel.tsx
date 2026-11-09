@@ -217,13 +217,15 @@ export function RfpIntakePanel() {
     setLastArrival(null);
   }
 
-  // Polling: mientras haya tickets en "analizando", refresca cada 2s SOLO
-  // esos tickets (no la lista entera) -- CONTEXT9.md: "la UI consulta/refresca
-  // estado (analizando -> analisis_completo o descartado)". El stream SSE
-  // anuncia la llegada; el avance de estado posterior sigue por acá.
+  // Polling: mientras haya tickets procesandose en segundo plano
+  // ("analizando" o "generando_borrador"), refresca cada 2s SOLO esos tickets
+  // (no la lista entera) -- CONTEXT9.md: "la UI consulta/refresca estado".
+  // El stream SSE anuncia la llegada; el avance de estado posterior sigue por
+  // acá. Sin "generando_borrador", la pantalla se quedaba en "Generando
+  // propuesta..." aunque el worker ya hubiera terminado.
   useEffect(() => {
     const analyzingIds = tickets
-      .filter((detail) => detail.ticket.status === "analizando")
+      .filter((detail) => detail.ticket.status === "analizando" || detail.ticket.status === "generando_borrador")
       .map((detail) => detail.ticket.id);
     if (analyzingIds.length === 0) return;
 
@@ -343,8 +345,8 @@ export function RfpIntakePanel() {
   return (
     <div className="analysis-grid">
       <section className="card analysis-intro-card">
-        <div className="eyebrow">Hito 09 - Parte 1 - Recepcion de RFPs</div>
-        <h2 className="panel-title">Sube una RFP en PDF y segui su ticket en tiempo real</h2>
+        <div className="eyebrow">Recepcion de RFPs</div>
+        <h2 className="panel-title">Sube una RFP en PDF y sigue su ticket en tiempo real</h2>
         <p className="analysis-copy">
           Se crea un ticket por cada PDF subido. El analisis (conversion, clasificacion, y reparto
           por departamento) corre en segundo plano -- esta pantalla se refresca sola mientras el
@@ -495,10 +497,7 @@ export function RfpIntakePanel() {
                       approvalsByTicket[detail.ticket.id].map((approval) => {
                         const reasonKey = `${detail.ticket.id}:${approval.department_id}`;
                         return (
-                          <div
-                            key={approval.department_id}
-                            style={{ border: "1px solid var(--border, #333)", borderRadius: "8px", padding: "0.75rem" }}
-                          >
+                          <div key={approval.department_id} className="approval-card">
                             <div style={{ display: "flex", justifyContent: "space-between" }}>
                               <strong>{DEPARTMENT_LABELS[approval.department_id] ?? approval.department_id}</strong>
                               <span>Responsable: {approval.approver}</span>
@@ -510,7 +509,7 @@ export function RfpIntakePanel() {
                               onChange={(event) =>
                                 setReasonDrafts((prev) => ({ ...prev, [reasonKey]: event.target.value }))
                               }
-                              style={{ width: "100%", minHeight: "3rem" }}
+                              className="plain-textarea"
                             />
                             <div className="analysis-actions">
                               <button
@@ -531,7 +530,7 @@ export function RfpIntakePanel() {
                               </button>
                               <button
                                 type="button"
-                                className="secondary-button"
+                                className="secondary-button danger-button"
                                 disabled={busyAction === `reject:${detail.ticket.id}:${approval.department_id}`}
                                 onClick={() => submitDecision(detail.ticket.id, approval.department_id, "reject")}
                               >

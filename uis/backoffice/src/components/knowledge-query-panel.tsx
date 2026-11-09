@@ -26,6 +26,13 @@ export function KnowledgeQueryPanel() {
   const [draft, setDraft] = useState("");
   const listEndRef = useRef<HTMLDivElement | null>(null);
   const isOpen = connection.status === "open";
+  // El mensaje del agente no existe hasta su primer token, y antes de eso el
+  // grafo hace embedding + búsqueda + llamada al modelo (decenas de segundos
+  // con un proxy lento): sin este aviso parece que no responde.
+  const lastMessage = messages[messages.length - 1];
+  const awaitingAnswer =
+    lastMessage !== undefined &&
+    (lastMessage.role === "user" || (lastMessage.status === "streaming" && !lastMessage.text));
 
   useEffect(() => {
     listEndRef.current?.scrollIntoView({ block: "end" });
@@ -70,6 +77,11 @@ export function KnowledgeQueryPanel() {
             </div>
           ))
         )}
+        {awaitingAnswer && isOpen ? (
+          <p className="chat-thinking" role="status">
+            El agente está buscando la respuesta…
+          </p>
+        ) : null}
         <div ref={listEndRef} />
       </div>
 

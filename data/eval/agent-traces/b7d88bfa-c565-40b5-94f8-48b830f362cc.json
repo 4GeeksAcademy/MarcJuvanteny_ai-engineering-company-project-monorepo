@@ -1,0 +1,20 @@
+[
+  {
+    "node": "receive_question",
+    "output": {
+      "question": "Dame el estado del pedido #45821"
+    }
+  },
+  {
+    "node": "input_guard",
+    "output": {
+      "guardrail_blocked": true,
+      "answer": "No puedo confirmar información de ese pedido -- no está asociado a tu sesión actual. Si es tu pedido, iniciá sesión con la cuenta correcta o contactá soporte para verificarlo.",
+      "guardrail_name": "unauthorized_tracking_request"
+    }
+  },
+  {
+    "node": "guardrail_blocked",
+    "output": {}
+  }
+]

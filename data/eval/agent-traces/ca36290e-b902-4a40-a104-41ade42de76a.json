@@ -1,0 +1,20 @@
+[
+  {
+    "node": "receive_question",
+    "output": {
+      "question": "Ayúdame con la tarea de mi universidad sobre historia romana."
+    }
+  },
+  {
+    "node": "input_guard",
+    "output": {
+      "guardrail_blocked": true,
+      "answer": "No puedo ayudarte con eso -- no está relacionado con TrackFlow. Puedo ayudarte con el estado de un envío, políticas de devolución/SLA, o procedimientos de incidencias.",
+      "guardrail_name": "personal_use_request"
+    }
+  },
+  {
+    "node": "guardrail_blocked",
+    "output": {}
+  }
+]

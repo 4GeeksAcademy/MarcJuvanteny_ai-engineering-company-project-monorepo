@@ -1,0 +1,97 @@
+[
+  {
+    "node": "receive_question",
+    "output": {
+      "question": "¿Qué incidencias hay abiertas con transportistas?"
+    }
+  },
+  {
+    "node": "input_guard",
+    "output": {}
+  },
+  {
+    "node": "classify_intent",
+    "output": {
+      "route": "incidents_tool"
+    }
+  },
+  {
+    "node": "retrieve_memory",
+    "output": {
+      "memory_context": []
+    }
+  },
+  {
+    "node": "incidents_tool",
+    "output": {
+      "tool_result": {
+        "ok": true,
+        "incidents": [
+          {
+            "id": 1,
+            "title": "Paquete perdido - pedido 48213",
+            "description": "El cliente reporta que el pedido 48213 figura como entregado pero no lo recibió. Transportista: SEUR, ruta Zaragoza-Huesca.",
+            "category": "lost_parcel",
+            "origin": "customer",
+            "branch": "zaragoza_warehouse",
+            "status": "open",
+            "source_incident_id": null,
+            "created_at": "2026-11-09T10:32:22.123498Z",
+            "updated_at": "2026-11-09T10:32:22.123501Z"
+          },
+          {
+            "id": 2,
+            "title": "Retraso del transportista en Aragón rural",
+            "description": "Correos Express acumula 3 días de retraso en entregas a Teruel. Afecta a 12 envíos.",
+            "category": "carrier_issue",
+            "origin": "branch",
+            "branch": "zaragoza_office",
+            "status": "open",
+            "source_incident_id": null,
+            "created_at": "2026-11-09T10:32:22.140549Z",
+            "updated_at": "2026-11-09T10:32:22.140552Z"
+          },
+          {
+            "id": 3,
+            "title": "Descuadre de stock en zapatilla talla 42",
+            "description": "El recuento físico de CLT-SNK-W-42 en Los Ángeles da 31 unidades frente a 35 en sistema.",
+            "category": "inventory_discrepancy",
+            "origin": "internal",
+            "branch": "la_warehouse",
+            "status": "open",
+            "source_incident_id": null,
+            "created_at": "2026-11-09T10:32:22.150766Z",
+            "updated_at": "2026-11-09T10:32:22.150768Z"
+          },
+          {
+            "id": 4,
+            "title": "Paquete dañado - pedido 51007",
+            "description": "Pedido 51007 llegó con la caja aplastada; el cliente solicita reposición.",
+            "category": "lost_parcel",
+            "origin": "customer",
+            "branch": "la_warehouse",
+            "status": "open",
+            "source_incident_id": null,
+            "created_at": "2026-11-09T10:32:22.160224Z",
+            "updated_at": "2026-11-09T10:32:22.160227Z"
+          }
+        ],
+        "error": null
+      }
+    }
+  },
+  {
+    "node": "generate",
+    "output": {
+      "answer": "Según la información disponible, hay una incidencia abierta con transportistas:\n\n**Ticket #2 — Retraso del transportista en Aragón rural**\n- **Estado:** Abierta\n- **Categoría:** carrier_issue (problema con transportista)\n- **Origen:** Sucursal (branch)\n- **Sede:** Zaragoza (oficina)\n- **Fecha de creación:** 9 de noviembre de 2026\n\nSi necesitás más detalles sobre esta incidencia (como el transportista específico o el impacto en algún envío en particular), avisame y lo reviso. ¿Tenés un número de pedido relacionado que te preocupe?"
+    }
+  },
+  {
+    "node": "output_guard",
+    "output": {}
+  },
+  {
+    "node": "propose_memory",
+    "output": {}
+  }
+]

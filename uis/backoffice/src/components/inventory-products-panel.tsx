@@ -75,10 +75,10 @@ export function InventoryProductsPanel() {
     <div className="suppliers-layout">
       <section className="card suppliers-hero-card">
         <div>
-          <div className="eyebrow">Hito 05 · Inventario unificado</div>
+          <div className="eyebrow">Inventario unificado</div>
           <h2 className="panel-title">Productos y stock por almacen</h2>
           <p className="analysis-copy">
-            Fuente: GET /inventory/products. Cada fila permite crear una orden de entrada o salida para ese producto.
+            Cada fila permite crear una orden de entrada o salida para ese producto.
           </p>
         </div>
 
@@ -102,7 +102,7 @@ export function InventoryProductsPanel() {
         <div className="section-header-row">
           <div>
             <h3 className="panel-title">Listado de productos</h3>
-            <p className="section-caption">Incluye nombre, SKU, cliente, categoria, almacen y current_stock.</p>
+            <p className="section-caption">Nombre, SKU, cliente, categoria, almacen y stock actual.</p>
           </div>
           <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
             <Link href="/inventory/orders" className="secondary-button compact-button">
