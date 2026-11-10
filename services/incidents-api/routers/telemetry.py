@@ -6,13 +6,15 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import insert
 from sqlmodel import Session
 
-from database import SQL_ENGINE, get_db
-from models import TelemetryEventRecord
+from auth_service import get_user_from_token
+from database import SQL_ENGINE, get_db, get_tinydb_path
+from models import TelemetryEventRecord, UserWithProfileRecord
 from telemetry.analysis import (
     compute_availability,
     compute_error_rate,
@@ -25,6 +27,24 @@ from telemetry.analysis import (
 DEFAULT_REPORT_WINDOW = timedelta(days=7)
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def get_current_report_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> UserWithProfileRecord:
+    """Auditoría OWASP A01 (C3): `GET /telemetry/report` (métricas
+    operativas: volumen, errores, latencia, disponibilidad) exige el JWT del
+    backoffice. `POST /telemetry/events` sigue sin auth A PROPÓSITO:
+    `navigator.sendBeacon()` no puede mandar `Authorization`, y cada evento
+    ya se valida contra la allowlist de `event-shcemas.json` -- riesgo
+    aceptado y documentado (A04/A05 en el informe)."""
+
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.", headers={"WWW-Authenticate": "Bearer"}
+        )
+    return get_user_from_token(get_tinydb_path(), credentials.credentials)
 logger = logging.getLogger("telemetry")
 
 # Reserved for forwarding validated events to an external analytics/warehouse
@@ -123,7 +143,9 @@ def _as_utc(value: datetime) -> datetime:
 async def get_telemetry_report(
     start_date: datetime | None = Query(default=None, description="ISO 8601. Por defecto: end_date - 7 dias."),
     end_date: datetime | None = Query(default=None, description="ISO 8601. Por defecto: ahora (UTC)."),
+    current_user: UserWithProfileRecord = Depends(get_current_report_user),
 ) -> dict[str, Any]:
+    _ = current_user
     # El periodo se resuelve una unica vez aqui y se pasa igual a cada
     # funcion de metrica — ninguna aplica su propia ventana por defecto.
     resolved_end = _as_utc(end_date) if end_date is not None else datetime.now(timezone.utc)

@@ -1,0 +1,61 @@
+[
+  {
+    "node": "receive_question",
+    "output": {
+      "question": "¿Dónde está mi pedido?"
+    }
+  },
+  {
+    "node": "input_guard",
+    "output": {}
+  },
+  {
+    "node": "classify_intent",
+    "output": {
+      "route": "rag"
+    }
+  },
+  {
+    "node": "retrieve_memory",
+    "output": {
+      "memory_context": []
+    }
+  },
+  {
+    "node": "retrieve",
+    "output": {
+      "context": [
+        {
+          "company": "trackflow",
+          "source_document": "sla-delivery",
+          "section": "Resumen",
+          "language": "es",
+          "chunk_index": 0,
+          "text": "Resumen\n\nTrackFlow gestiona la última milla desde sus almacenes de Los Ángeles\n(Estados Unidos) y Zaragoza (España). Los plazos de entrega que se citan a\nun cliente o marca prospecto dependen del almacén de origen, la zona de\ndestino y si el envío es nacional o internacional. Estos son los tiempos\nestándar en condiciones normales de operación — no aplican durante picos de\ndemanda declarados (ver la advertencia al final de este documento)."
+        },
+        {
+          "company": "trackflow",
+          "source_document": "sla-delivery",
+          "section": "SLA de entrega nacional — España",
+          "language": "es",
+          "chunk_index": 2,
+          "text": "SLA de entrega nacional — España\n\n- **Península Ibérica**: 24–48 horas desde la salida del almacén de\n  Zaragoza, vía MRW España o SEUR.\n- **Baleares**: 48–72 horas (día adicional por el tramo marítimo/aéreo).\n- **Envíos urgentes**: 24 horas en Península, vía DHL Express España, con\n  coste adicional."
+        }
+      ]
+    }
+  },
+  {
+    "node": "generate",
+    "output": {
+      "answer": "Hola. Para poder decirte dónde está tu pedido, necesito tu **número de seguimiento o de pedido** y, si lo tienes, el **código postal** de entrega.\n\nCon esos datos, podré consultar el estado exacto de tu envío y darte la información actualizada."
+    }
+  },
+  {
+    "node": "output_guard",
+    "output": {}
+  },
+  {
+    "node": "propose_memory",
+    "output": {}
+  }
+]

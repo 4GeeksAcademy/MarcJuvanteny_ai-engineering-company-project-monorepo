@@ -1,0 +1,25 @@
+Servidor de prueba: contenedor ubuntu:24.04 (172.17.0.2) tras provision.sh
+
+--- 1. SSH como root, con la clave válida de ops (debe fallar):
+root@172.17.0.2: Permission denied (publickey).
+    exit=255
+--- 2. SSH trackops por contraseña (debe fallar: el método ni se ofrece):
+trackops@172.17.0.2: Permission denied (publickey).
+    exit=255
+--- 3. SSH trackops con clave (debe entrar) + sudo limitado + permisos, en una sola sesión:
+login OK como trackops uid=1001 grupos=trackops adm
+sudo ufw status (permitido):        Status: active
+sudo cat /etc/shadow (no permitido): sudo: a password is required
+sudo bash (no permitido):            sudo: a password is required
+leer logs de la app:                 legible
+leer secretos /etc/trackflow:        cat: /etc/trackflow/knowledge-api.env: Permission denied
+escribir en el código de la app:     touch: cannot touch '/opt/trackflow/app/x': Permission denied
+    exit=0
+--- 4. La app (usuario trackflow) no puede modificar su propio código ni hacer login:
+touch como trackflow: touch: cannot touch '/opt/trackflow/app/backdoor.py': Permission denied
+login interactivo trackflow: This account is currently not available.
+--- 5. Firewall visto desde fuera (servidores HTTP de prueba en 443 y 8000):
+puerto 443   HTTP 200 (abierto)
+puerto 8000  sin respuesta (bloqueado por ufw)
+--- 6. Rate limit SSH (ufw limit, 6 conexiones/30 s): 8 conexiones seguidas
+ok ok BLOQUEADA BLOQUEADA BLOQUEADA BLOQUEADA BLOQUEADA BLOQUEADA 

@@ -1,0 +1,6 @@
+entrada usuario  directo              -> BLOQUEADO
+entrada usuario  zero-width U+200B    -> NO BLOQUEADO (evasión)
+entrada usuario  ancho completo       -> NO BLOQUEADO (evasión)
+contenido externo nota oculta (caso 2) -> sin cambios
+contenido externo ignora + oculto      -> sin cambios
+contenido externo política legítima    -> sin cambios

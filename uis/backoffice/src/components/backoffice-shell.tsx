@@ -14,9 +14,6 @@ const navItems = [
   { href: "/knowledge", label: "Base de conocimiento", key: "knowledge" },
   { href: "/rfp", label: "Recepcion de RFPs", key: "rfp" },
   { href: "/account/profile", label: "Mi cuenta", key: "account" },
-  { href: "#", label: "Candidatos", key: "candidates" },
-  { href: "#", label: "Pipeline", key: "pipeline" },
-  { href: "#", label: "Configuracion", key: "settings" },
 ];
 
 type BackofficeShellProps = {
@@ -39,20 +36,23 @@ export function BackofficeShell({ activeKey, title, subtitle, children }: Backof
     <div className="backoffice-shell">
       <aside className="sidebar" aria-label="Navegacion interna de backoffice">
         <div className="brand">
-          TrackFlow <span>Backoffice</span>
+          {/* Mismo isotipo que el logo de uis/website. */}
+          <span className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+              <rect x="0" y="0" width="48" height="48" fill="#d7dbe1" />
+              <path d="M6 10H42V22H30V40H18V24L29 16H6Z" fill="#000b2a" />
+              <path d="M18 10H30L24 16L18 22Z" fill="#e8640c" />
+            </svg>
+          </span>
+          <span>
+            Track<span className="brand-flow">Flow</span>
+            <span className="brand-product">Backoffice</span>
+          </span>
         </div>
         <nav>
           {navItems.map((item) => {
             const isActive = item.key === activeKey;
             const className = isActive ? "sidebar-item active" : "sidebar-item";
-
-            if (item.href === "#") {
-              return (
-                <span key={item.key} className={className} aria-current={isActive ? "page" : undefined}>
-                  {item.label}
-                </span>
-              );
-            }
 
             return (
               <Link key={item.key} href={item.href} className={className} aria-current={isActive ? "page" : undefined}>

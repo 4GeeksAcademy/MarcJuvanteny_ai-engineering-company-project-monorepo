@@ -321,25 +321,65 @@ export function IncidentsManagementPanel() {
     }
   }
 
+  const countByStatus = (key: string) => summaryRows?.status.find((row) => row.key === key)?.count ?? 0;
+
   return (
     <div className="suppliers-layout">
-      <section className="card suppliers-hero-card">
-        <div>
-          <div className="eyebrow">Hito 10 · Gestor de incidencias centralizado</div>
-          <h2 className="panel-title">Registra, filtra y resuelve incidencias operativas desde un unico panel</h2>
-          <p className="analysis-copy">
-            Cubre clientes, sedes e incidencias internas con un ciclo de vida controlado: abierta, en curso, resuelta o descartada.
-          </p>
+      <section className="card suppliers-toolbar-card">
+        <div className="section-header-row">
+          <div>
+            <h3 className="panel-title">Filtros operativos</h3>
+            <p className="section-caption">El listado se actualiza al cambiar estado, origen o sede.</p>
+          </div>
+        </div>
+
+        <div className="suppliers-filters-grid filters-grid-3">
+          <label className="field-block">
+            <span>Estado</span>
+            <select value={selectedStatus} onChange={(event) => setSelectedStatus(event.target.value)}>
+              <option value="">Todos</option>
+              {statusOptions.map((status) => (
+                <option key={status} value={status}>{statusLabels[status]}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field-block">
+            <span>Origen</span>
+            <select value={selectedOrigin} onChange={(event) => setSelectedOrigin(event.target.value)}>
+              <option value="">Todos</option>
+              {originOptions.map((origin) => (
+                <option key={origin} value={origin}>{originLabels[origin]}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field-block">
+            <span>Sede</span>
+            <select value={selectedBranch} onChange={(event) => setSelectedBranch(event.target.value)}>
+              <option value="">Todas</option>
+              {branchOptions.map((branch) => (
+                <option key={branch} value={branch}>{branchLabels[branch]}</option>
+              ))}
+            </select>
+          </label>
         </div>
       </section>
 
-      <section className="card suppliers-table-card">
-        <div className="section-header-row">
-          <div>
-            <h3 className="panel-title">Resumen agregado</h3>
-            <p className="section-caption">Metricas de GET /api/incidents/summary por estado, categoria, origen y sede.</p>
-          </div>
-        </div>
+      {/* Metricas plegadas por defecto: el titular resume lo urgente y el
+          detalle se abre solo cuando hace falta. */}
+      <details className="card collapsible-card">
+        <summary>
+          <span className="collapsible-heading">
+            <span className="panel-title">Resumen de incidencias</span>
+            {summaryRows ? (
+              <span className="collapsible-headline">
+                <span className="status-badge status-badge-open">{countByStatus("open")} abiertas</span>
+                <span className="status-badge status-badge-in-progress">{countByStatus("in_progress")} en curso</span>
+              </span>
+            ) : null}
+          </span>
+        </summary>
 
         {isSummaryLoading ? <p className="empty-state-inline">Cargando metricas...</p> : null}
         {!isSummaryLoading && summaryError ? (
@@ -352,7 +392,7 @@ export function IncidentsManagementPanel() {
         ) : null}
 
         {!isSummaryLoading && summaryRows ? (
-          <div className="suppliers-summary-strip" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
+          <div className="suppliers-summary-strip summary-grid-4">
             <article className="supplier-stat-card">
               <span>Por estado</span>
               <div className="category-chip-list">
@@ -387,48 +427,7 @@ export function IncidentsManagementPanel() {
             </article>
           </div>
         ) : null}
-      </section>
-
-      <section className="card suppliers-toolbar-card">
-        <div className="section-header-row">
-          <div>
-            <h3 className="panel-title">Filtros operativos</h3>
-            <p className="section-caption">El listado se refresca automaticamente al cambiar estado, origen o sede.</p>
-          </div>
-        </div>
-
-        <div className="suppliers-filters-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-          <label className="field-block">
-            <span>Estado</span>
-            <select value={selectedStatus} onChange={(event) => setSelectedStatus(event.target.value)}>
-              <option value="">Todos</option>
-              {statusOptions.map((status) => (
-                <option key={status} value={status}>{statusLabels[status]}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="field-block">
-            <span>Origen</span>
-            <select value={selectedOrigin} onChange={(event) => setSelectedOrigin(event.target.value)}>
-              <option value="">Todos</option>
-              {originOptions.map((origin) => (
-                <option key={origin} value={origin}>{originLabels[origin]}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="field-block">
-            <span>Sede</span>
-            <select value={selectedBranch} onChange={(event) => setSelectedBranch(event.target.value)}>
-              <option value="">Todas</option>
-              {branchOptions.map((branch) => (
-                <option key={branch} value={branch}>{branchLabels[branch]}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </section>
+      </details>
 
       <section className="card suppliers-table-card">
         <div className="section-header-row">
@@ -515,13 +514,13 @@ export function IncidentsManagementPanel() {
         </div>
       </section>
 
-      <section className="card supplier-form-card">
-        <div className="section-header-row">
-          <div>
-            <h3 className="panel-title">Registrar incidencia</h3>
-            <p className="section-caption">El formulario consume POST /api/incidents y muestra el error de la API junto al campo afectado.</p>
-          </div>
-        </div>
+      <details className="card collapsible-card supplier-form-card">
+        <summary>
+          <span className="collapsible-heading">
+            <span className="panel-title">Registrar incidencia</span>
+            <span className="section-caption">Nueva incidencia de cliente, sede o interna</span>
+          </span>
+        </summary>
 
         {submitError ? <p className="feedback-error">{submitError}</p> : null}
         {submitSuccess ? <p className="feedback-success">{submitSuccess}</p> : null}
@@ -595,7 +594,7 @@ export function IncidentsManagementPanel() {
             </button>
           </div>
         </form>
-      </section>
+      </details>
     </div>
   );
 }

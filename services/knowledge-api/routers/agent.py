@@ -20,26 +20,42 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from schemas import AgentQueryResponse, QueryRequest
 
 from agent_graph import run_agent
+from chat_auth import require_bearer_user
 from guardrail_audit import get_summary
+from order_access import authorized_order_ids_for
+from rate_limit import SlidingWindowRateLimiter, enforce_model_rate_limit, get_model_rate_limiter
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 logger = logging.getLogger("agent")
 
 
 @router.post("/query", response_model=AgentQueryResponse)
-async def query_agent(payload: QueryRequest) -> AgentQueryResponse:
+async def query_agent(
+    payload: QueryRequest,
+    user_id: str = Depends(require_bearer_user),
+    limiter: SlidingWindowRateLimiter = Depends(get_model_rate_limiter),
+) -> AgentQueryResponse:
+    # Auditoría OWASP A01: JWT obligatorio y pedidos autorizados derivados
+    # del servidor (fail-closed), nunca del body.
+    # Hito 12: rate limit por usuario antes de cualquier llamada al modelo.
+    enforce_model_rate_limit(limiter, user_id)
     try:
         state, _trace, thread_id = await run_agent(
-            payload.question, thread_id=payload.thread_id, authorized_order_ids=payload.authorized_order_ids
+            payload.question,
+            thread_id=payload.thread_id,
+            authorized_order_ids=authorized_order_ids_for(user_id),
+            actor_id=user_id,
         )
     except Exception:
         # Nunca un stack trace crudo al cliente -- el detalle completo va al
         # log del servidor.
-        logger.exception("Fallo al ejecutar el grafo del agente: %s", payload.question)
+        # Hito 12 (RGPD art. 5, minimización): nunca la pregunta en el log --
+        # puede traer direcciones o datos de contacto del destinatario.
+        logger.exception("Fallo al ejecutar el grafo del agente (pregunta de %d caracteres)", len(payload.question))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail="No se pudo generar una respuesta en este momento."
         )
@@ -58,5 +74,6 @@ async def query_agent(payload: QueryRequest) -> AgentQueryResponse:
 
 
 @router.get("/guardrails/summary")
-async def guardrails_summary() -> dict[str, Any]:
+async def guardrails_summary(user_id: str = Depends(require_bearer_user)) -> dict[str, Any]:
+    _ = user_id
     return get_summary()

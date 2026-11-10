@@ -23,9 +23,16 @@ from pathlib import Path
 import pytest
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT_DIR / "data" / "process"))
 
-import rag  # noqa: E402
+# data/process/rag.py (indexación) cargado por RUTA y bajo un nombre propio,
+# no con `import rag`: si otro módulo de tests ya importó services/knowledge-api
+# (p. ej. tests/services/*), `sys.modules["rag"]` es data/pipelines/rag.py y
+# este archivo recibía el módulo equivocado -- fallaba según el orden de
+# ejecución. Mismo patrón que test_agent_graph.py.
+_indexing_spec = importlib.util.spec_from_file_location("trackflow_rag_indexing_test_rag", ROOT_DIR / "data" / "process" / "rag.py")
+rag = importlib.util.module_from_spec(_indexing_spec)
+sys.modules["trackflow_rag_indexing_test_rag"] = rag
+_indexing_spec.loader.exec_module(rag)
 from qdrant_client import QdrantClient  # noqa: E402
 
 # data/pipelines/rag.py se llama IGUAL que data/process/rag.py (ya importado

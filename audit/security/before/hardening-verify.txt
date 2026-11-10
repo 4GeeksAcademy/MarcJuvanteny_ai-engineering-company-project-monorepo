@@ -1,0 +1,32 @@
+== Usuarios
+FAIL  existe el usuario de operación trackops
+FAIL  trackops no es root (uid != 0)
+PASS  root es la ÚNICA cuenta con uid 0
+FAIL  trackops no tiene sudo total (no está en el grupo sudo)
+FAIL  trackops tiene contraseña bloqueada (solo clave SSH)
+FAIL  trackops tiene authorized_keys 600
+FAIL  sudoers de ops existe y es válido
+FAIL  sudoers de ops no concede ALL
+FAIL  usuario de la app trackflow sin shell de login
+== SSH (configuración efectiva, sshd -T)
+FAIL  PermitRootLogin no
+FAIL  PasswordAuthentication no
+PASS  KbdInteractiveAuthentication no
+FAIL  AllowUsers = trackops
+FAIL  MaxAuthTries <= 3
+FAIL  X11Forwarding no
+FAIL  AllowTcpForwarding solo local
+== Permisos de carpetas
+FAIL  /opt/trackflow/app root:trackflow 750 (código no modificable por la app)
+FAIL  /etc/trackflow root:trackflow 750 (secretos)
+FAIL  ningún archivo de /etc/trackflow es legible por 'otros'
+FAIL  /var/log/trackflow trackflow:adm 2750
+FAIL  /var/lib/trackflow trackflow:trackflow 700
+FAIL  la app no puede escribir en el código
+== Firewall (ufw)
+FAIL  ufw activo
+FAIL  entrante denegado por defecto
+FAIL  abiertos SOLO 22, 80 y 443
+FAIL  Docker publica en 127.0.0.1 por defecto (no salta ufw)
+
+RESULTADO: 24 control(es) FAIL

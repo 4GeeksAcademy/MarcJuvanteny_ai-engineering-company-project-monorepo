@@ -1,0 +1,16 @@
+Name              Version   ID                  Fix Versions
+----------------- --------- ------------------- ------------
+authlib           1.8.0     CVE-2026-96760      1.9.0
+authlib           1.8.0     CVE-2026-114618     1.9.0
+authlib           1.8.0     CVE-2026-114615     1.9.0
+authlib           1.8.0     CVE-2026-114617     1.9.0
+authlib           1.8.0     CVE-2026-114620     1.9.0
+authlib           1.8.0     CVE-2026-114616     1.9.1
+certifi           2026.7.22 PYSEC-2026-4320     2026.10.18
+certifi           2026.7.22 PYSEC-2026-4320     2026.10.19
+dnspython         2.8.0     CVE-2026-114605     2.9.0
+fastmcp           4.0.10    GHSA-7xgj-8392-5q4r 3.4.10,4.1.2
+fastmcp           4.0.10    GHSA-vqqp-x5qm-5qp4 4.1.2
+opentelemetry-api 1.45.0    CVE-2026-114603     1.45.1
+pytest            8.4.2     PYSEC-2026-1845     9.0.3
+pytest            8.4.2     PYSEC-2026-1845     9.0.3

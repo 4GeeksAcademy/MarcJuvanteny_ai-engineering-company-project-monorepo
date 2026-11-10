@@ -214,14 +214,18 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
+from collections.abc import AsyncIterator, Awaitable
 from typing import Any, Callable, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 import pipeline_path  # noqa: F401  (efecto secundario: agrega data/pipelines/ a sys.path)
-from rag import generate_answer, retrieve
+from rag import astream_answer, generate_answer, retrieve
+from agent_decision_log import write_decisions
+from input_sanitization import normalize_text
 from intent_extraction import extract_incident_query, extract_inventory_query
 from mcp_client import call_mcp_tool
 from memory_decision import MemoryDecision, classify_memory_decision
@@ -279,6 +283,9 @@ class AgentState(TypedDict, total=False):
     authorized_order_ids: list[str] | None  # pedidos que la sesion actual puede consultar (ver guardrails.py)
     guardrail_blocked: bool | None
     guardrail_redirect_suffix: str | None
+    # Hito 12 (trazabilidad, agent_decision_log.py): qué guardrail actuó, para
+    # poder registrar POR QUÉ se bloqueó/redirigió/reemplazó una respuesta.
+    guardrail_name: str | None
 
 
 def classify_intent(question: str) -> str:
@@ -298,7 +305,10 @@ def classify_intent(question: str) -> str:
 
 
 def _receive_question_node(state: AgentState) -> dict[str, Any]:
-    return {"question": (state.get("question") or "").strip()}
+    # Hito 12: normalización explícita ANTES de cualquier guardrail
+    # (input_sanitization.py) -- un carácter invisible o letras de ancho
+    # completo evadían `input_guard`. Punto único para HTTP y WebSocket.
+    return {"question": normalize_text(state.get("question") or "").strip()}
 
 
 def _record_guardrail(result: GuardrailResult, state: AgentState, audit_fn: Callable[..., None]) -> None:
@@ -329,17 +339,17 @@ def _make_input_guard_node(
             result = check_fn(question)
             if result is not None:
                 _record_guardrail(result, state, audit_fn)
-                return {"guardrail_blocked": True, "answer": result.message}
+                return {"guardrail_blocked": True, "answer": result.message, "guardrail_name": result.guardrail_name}
 
         auth_result = check_unauthorized_tracking_request(question, state.get("authorized_order_ids"))
         if auth_result is not None:
             _record_guardrail(auth_result, state, audit_fn)
-            return {"guardrail_blocked": True, "answer": auth_result.message}
+            return {"guardrail_blocked": True, "answer": auth_result.message, "guardrail_name": auth_result.guardrail_name}
 
         casual_result = check_casual_question(question)
         if casual_result is not None:
             _record_guardrail(casual_result, state, audit_fn)
-            return {"guardrail_redirect_suffix": casual_result.message}
+            return {"guardrail_redirect_suffix": casual_result.message, "guardrail_name": casual_result.guardrail_name}
 
         return {}
 
@@ -548,8 +558,17 @@ def _make_generate_node(
     generate_fn: Callable[[str, list[dict[str, Any]]], str],
     sanitize_fn: Callable[[list[dict[str, Any]]], tuple[list[dict[str, Any]], bool]] = sanitize_external_content,
     audit_fn: Callable[..., None] = record_guardrail_event,
-) -> Callable[[AgentState], dict[str, Any]]:
-    def generate_node(state: AgentState) -> dict[str, Any]:
+    astream_generate_fn: Callable[[str, list[dict[str, Any]]], AsyncIterator[str]] | None = None,
+) -> Callable[[AgentState], Any]:
+    """`astream_generate_fn` (Hito 10 Parte 2, chat por WebSocket): si se
+    pasa, el nodo pasa a ser async y emite cada token por el canal
+    `stream_mode="custom"` de LangGraph (`get_stream_writer()`) a medida que
+    llega, además de devolver la respuesta completa en `answer` -- el resto
+    del grafo (`output_guard`, `propose_memory`) la ve exactamente igual que
+    antes. Misma sanitización y auditoría en las dos variantes: solo cambia
+    el canal, nunca la lógica del agente."""
+
+    def prepare_chunks(state: AgentState) -> list[dict[str, Any]]:
         context = list(state.get("context") or [])
         memory_context = list(state.get("memory_context") or [])
         tool_chunks = _tool_result_to_context_chunks(state.get("tool_result"))
@@ -564,10 +583,20 @@ def _make_generate_node(
                 question=state["question"],
                 thread_id=state.get("thread_id", ""),
             )
+        return sanitized_chunks
 
-        return {"answer": generate_fn(state["question"], sanitized_chunks)}
+    def generate_node(state: AgentState) -> dict[str, Any]:
+        return {"answer": generate_fn(state["question"], prepare_chunks(state))}
 
-    return generate_node
+    async def astream_generate_node(state: AgentState) -> dict[str, Any]:
+        write = get_stream_writer()
+        parts: list[str] = []
+        async for token in astream_generate_fn(state["question"], prepare_chunks(state)):
+            parts.append(token)
+            write({"token": token})
+        return {"answer": "".join(parts)}
+
+    return astream_generate_node if astream_generate_fn is not None else generate_node
 
 
 def _make_output_guard_node(
@@ -584,7 +613,7 @@ def _make_output_guard_node(
         result = validate_fn(answer)
         if result is not None:
             _record_guardrail(result, state, audit_fn)
-            return {"answer": result.message}
+            return {"answer": result.message, "guardrail_name": result.guardrail_name}
 
         suffix = state.get("guardrail_redirect_suffix")
         if suffix:
@@ -671,6 +700,13 @@ def _default_generate_with_agent_prompt(question: str, context: list[dict[str, A
     return generate_answer(question, context, system_prompt=AGENT_SYSTEM_PROMPT)
 
 
+def astream_generate_with_agent_prompt(question: str, context: list[dict[str, Any]]) -> AsyncIterator[str]:
+    """Versión en streaming del default de arriba (Hito 10 Parte 2): mismo
+    `AGENT_SYSTEM_PROMPT`, mismo prompt, tokens a medida que llegan."""
+
+    return astream_answer(question, context, system_prompt=AGENT_SYSTEM_PROMPT)
+
+
 def build_graph(
     retrieve_fn: Callable[[str], list[dict[str, Any]]] = retrieve,
     generate_fn: Callable[[str, list[dict[str, Any]]], str] = _default_generate_with_agent_prompt,
@@ -686,6 +722,7 @@ def build_graph(
     validate_output_fn: Callable[[str], GuardrailResult | None] = validate_output,
     guardrail_audit_fn: Callable[..., None] = record_guardrail_event,
     checkpointer: Any = None,
+    astream_generate_fn: Callable[[str, list[dict[str, Any]]], AsyncIterator[str]] | None = None,
 ) -> CompiledStateGraph:
     """Arma y compila el grafo. Todas las funciones de negocio son
     inyectables para poder probar el enrutamiento y el contrato de nodos
@@ -712,7 +749,10 @@ def build_graph(
     graph.add_node("retrieve", _make_retrieve_node(retrieve_fn))
     graph.add_node("incidents_tool", _make_incidents_tool_node(incidents_tool_fn))
     graph.add_node("inventory_tool", _make_inventory_tool_node(inventory_tool_fn))
-    graph.add_node("generate", _make_generate_node(generate_fn, sanitize_external_content_fn, guardrail_audit_fn))
+    graph.add_node(
+        "generate",
+        _make_generate_node(generate_fn, sanitize_external_content_fn, guardrail_audit_fn, astream_generate_fn),
+    )
     graph.add_node("no_context", _no_context_node)
     graph.add_node("empty_question", _empty_question_node)
     graph.add_node("tool_failed", _tool_failed_node)
@@ -798,6 +838,10 @@ async def run_agent(
     validate_output_fn: Callable[[str], GuardrailResult | None] = validate_output,
     guardrail_audit_fn: Callable[..., None] = record_guardrail_event,
     checkpointer: Any = None,
+    astream_generate_fn: Callable[[str, list[dict[str, Any]]], AsyncIterator[str]] | None = None,
+    on_token: Callable[[str], Awaitable[None]] | None = None,
+    actor_id: str | None = None,
+    decision_log_fn: Callable[..., None] = write_decisions,
 ) -> tuple[AgentState, list[dict[str, Any]], str]:
     """Corre el grafo de punta a punta. Devuelve `(estado_final, trace, thread_id)`.
 
@@ -821,6 +865,13 @@ async def run_agent(
     el orden en que LangGraph ejecutó los nodos (`stream_mode="updates"`),
     guardada en disco para poder consultarla después de la corrida — y
     muestra con claridad si se usó el RAG, una tool, o ambos.
+
+    `astream_generate_fn` + `on_token` (Hito 10 Parte 2, chat por
+    WebSocket -- `chat_runner.py`): el grafo corre además con
+    `stream_mode="custom"` y cada token que `generate` emite se entrega a
+    `on_token` en cuanto llega. Cancelar la tarea que espera a
+    `run_agent()` cancela el `astream` y, con él, el stream del LLM. Sin
+    estos parámetros (`POST /agent/query`) todo queda exactamente igual.
     """
     compiled_graph = build_graph(
         retrieve_fn=retrieve_fn,
@@ -837,27 +888,108 @@ async def run_agent(
         validate_output_fn=validate_output_fn,
         guardrail_audit_fn=guardrail_audit_fn,
         checkpointer=checkpointer or _DEFAULT_CHECKPOINTER,
+        astream_generate_fn=astream_generate_fn,
     )
     thread_id = thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
 
     trace: list[dict[str, Any]] = []
     final_state: dict[str, Any] = {"question": question, "thread_id": thread_id}
+    # Hito 12: qué hizo cada nodo y POR QUÉ (agent_decision_log.py).
+    decisions: list[dict[str, str]] = []
+    completed = False
 
-    async for update in compiled_graph.astream(
-        {"question": question, "thread_id": thread_id, "authorized_order_ids": authorized_order_ids},
-        config=config,
-        stream_mode="updates",
-    ):
-        for node_name, partial_state in update.items():
-            # LangGraph representa un nodo que no cambio nada del estado
-            # (p. ej. `propose_memory` cuando no hay nada memorable, que
-            # devuelve `{}`) como `None` en el stream de "updates" -- no es
-            # un error, es "sin cambios" (descubierto corriendo este
-            # escenario, ver Pasos/).
-            partial_state = partial_state or {}
-            trace.append({"node": node_name, "output": partial_state})
-            final_state.update(partial_state)
+    try:
+        async for mode, update in compiled_graph.astream(
+            {"question": question, "thread_id": thread_id, "authorized_order_ids": authorized_order_ids},
+            config=config,
+            stream_mode=["updates", "custom"],
+        ):
+            if mode == "custom":
+                if on_token is not None and isinstance(update, dict) and "token" in update:
+                    await on_token(update["token"])
+                continue
+            for node_name, partial_state in update.items():
+                # LangGraph representa un nodo que no cambio nada del estado
+                # (p. ej. `propose_memory` cuando no hay nada memorable, que
+                # devuelve `{}`) como `None` en el stream de "updates" -- no es
+                # un error, es "sin cambios" (descubierto corriendo este
+                # escenario, ver Pasos/).
+                partial_state = partial_state or {}
+                trace.append({"node": node_name, "output": partial_state})
+                final_state.update(partial_state)
+                action, reason = _explain_step(node_name, partial_state, final_state)
+                decisions.append({"node": node_name, "action": action, "reason": reason})
+        completed = True
+    finally:
+        if not completed:
+            # Interrupción del usuario (cancelación de la tarea, Hito 10) o fallo:
+            # también queda registrado, con los pasos que alcanzaron a correr.
+            decisions.append({"node": "-", "action": "cancelled", "reason": "turno abortado antes de terminar el grafo"})
+        decision_log_fn(
+            thread_id=thread_id, actor_id=actor_id, question=final_state.get("question") or question, steps=decisions
+        )
 
     _save_trace(thread_id, trace)
     return final_state, trace, thread_id  # type: ignore[return-value]
+
+
+def _matched_keywords(question: str, keywords: tuple[str, ...]) -> list[str]:
+    lowered = question.lower()
+    return [keyword for keyword in keywords if keyword in lowered]
+
+
+def _explain_step(node: str, output: dict[str, Any], state: dict[str, Any]) -> tuple[str, str]:
+    """`(acción, motivo)` legibles para auditoría. Nunca incluye el texto de
+    la pregunta ni de la respuesta (minimización): solo decisiones, conteos,
+    nombres de guardrail/tool y argumentos ya validados."""
+
+    question = state.get("question") or ""
+    guardrail = output.get("guardrail_name")
+    if node == "receive_question":
+        return "input_received", f"{len(question)} caracteres tras normalizar (NFKC, sin invisibles)"
+    if node == "input_guard":
+        if output.get("guardrail_blocked"):
+            return "blocked", f"guardrail de entrada '{guardrail}'"
+        if output.get("guardrail_redirect_suffix"):
+            return "allowed_with_redirect", f"guardrail de entrada '{guardrail}' (pregunta fuera de dominio)"
+        return "allowed", "ningún guardrail de entrada disparó"
+    if node in ("guardrail_blocked", "empty_question"):
+        return "stop", "respuesta del guardrail, sin RAG/tools/LLM" if node == "guardrail_blocked" else "pregunta vacía"
+    if node == "resolve_pending_memory_proposal":
+        record = output.get("memory_decision_record") or {}
+        return "memory_decision", f"propuesta pendiente resuelta como '{record.get('outcome')}'"
+    if node == "classify_intent":
+        route = output.get("route")
+        matched = _matched_keywords(question, _INCIDENT_KEYWORDS + _INVENTORY_KEYWORDS + _POLICY_KEYWORDS)
+        return f"route:{route}", f"palabras clave: {matched}" if matched else "sin palabras clave de tool: RAG por defecto"
+    if node == "retrieve_memory":
+        hits = len(output.get("memory_context") or [])
+        return ("memory_hit" if hits else "memory_miss"), f"{hits} hechos aprobados de memoria"
+    if node == "retrieve":
+        context = output.get("context") or []
+        sources = sorted({str(chunk.get("source_document")) for chunk in context})
+        return "rag_retrieve", f"{len(context)} fragmentos de {sources}"
+    if node in ("incidents_tool", "inventory_tool"):
+        tool_result = output.get("tool_result") or {}
+        args = extract_incident_query(question) if node == "incidents_tool" else extract_inventory_query(question)
+        tool_name = "query_incident_tool" if node == "incidents_tool" else "query_inventory_tool"
+        outcome = "ok" if tool_result.get("ok") else f"error={tool_result.get('error')}"
+        return f"tool_call:{tool_name}", f"args={args} -> {outcome}"
+    if node == "generate":
+        tool_ok = bool((state.get("tool_result") or {}).get("ok"))
+        chunks = len(state.get("context") or []) + len(state.get("memory_context") or []) + (1 if tool_ok else 0)
+        return "llm_generate", f"respuesta del modelo con {chunks} fuentes de contexto (saneadas)"
+    if node == "no_context":
+        return "no_context_answer", "sin fragmentos RAG, memoria ni resultado de tool"
+    if node == "tool_failed":
+        return "tool_failed_answer", f"tool falló: {(state.get('tool_result') or {}).get('error')}"
+    if node == "output_guard":
+        if guardrail:
+            return "output_replaced", f"guardrail de salida '{guardrail}'"
+        return ("output_ok_with_redirect" if output.get("answer") else "output_ok"), "validación de salida sin hallazgos"
+    if node == "propose_memory":
+        if output.get("pending_memory_proposal"):
+            return "memory_proposed", "interacción memorable: se PREGUNTA al usuario, no se escribe"
+        return "no_memory_proposal", "nada memorable"
+    return "step", node

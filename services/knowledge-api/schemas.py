@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from input_sanitization import MAX_USER_INPUT_CHARS
 
 
 class QueryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    question: str
+    # Hito 12: límite explícito antes de que el texto llegue al modelo
+    # (coste y dilución de instrucciones). La normalización (invisibles,
+    # NFKC) la hace `receive_question` del grafo, común a HTTP y WebSocket.
+    question: str = Field(max_length=MAX_USER_INPUT_CHARS)
     # Hito 8 (memoria, solo relevante para /agent/query): si se omite, el
     # agente arranca un hilo nuevo -- el cliente debe reenviar el
     # `thread_id` de AgentQueryResponse en el siguiente request para que
@@ -16,13 +21,10 @@ class QueryRequest(BaseModel):
     # `resolve_pending_memory_proposal` nunca podía alcanzarse via HTTP.
     # Ignorado por /knowledge/query (sin concepto de hilo/conversación).
     thread_id: str | None = None
-    # Hito 8 Parte 2 (guardrails, solo relevante para /agent/query): los
-    # numeros de pedido/tracking que la sesion que llama puede consultar
-    # legitimamente -- ver guardrails.py::check_unauthorized_tracking_request
-    # y Pasos/agent-guardrails.md "Decisiones" sobre el limite real de no
-    # tener un sistema de autenticacion de sesion conectado a este endpoint
-    # todavia. `None` (el default) desactiva ese guardrail especifico.
-    authorized_order_ids: list[str] | None = None
+    # `authorized_order_ids` YA NO viene del cliente (auditoría OWASP A01,
+    # Pasos/owasp-auditoria-hardening.md): el servidor lo deriva del JWT
+    # (`order_access.py`). Con `extra="forbid"`, mandarlo da 400 en vez de
+    # ignorarse en silencio.
 
 
 class QueryResponse(BaseModel):

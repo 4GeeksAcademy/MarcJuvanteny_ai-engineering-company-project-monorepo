@@ -39,10 +39,11 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 SERVICE_DIR = Path(__file__).resolve().parent
 load_dotenv(SERVICE_DIR / ".env")
@@ -54,6 +55,61 @@ MCP_SERVER_TOKEN = os.environ.get("MCP_SERVER_TOKEN", "")
 # incidents-api -- un poco mas generoso que el timeout HTTP directo que
 # reemplaza (antes 4s), pero sigue siendo corto y explícito.
 MCP_TIMEOUT_SECONDS = float(os.environ.get("MCP_TIMEOUT_SECONDS", "8"))
+
+
+# Auditoría OWASP A05/A01 (Pasos/owasp-auditoria-hardening.md): mínimo
+# privilegio del AGENTE, no solo del token. El MCP Server también expone
+# `create_incident_ticket_tool`, `update_incident_status_tool` y
+# `update_inventory_stock_tool`; si `MCP_SERVER_TOKEN` se emitiera con
+# scopes de escritura (`.env.example` dice "como mínimo" los de lectura),
+# el agente podría mutar datos. Esta allowlist lo impide en el cliente,
+# independientemente de los scopes del token -- defensa en profundidad.
+AGENT_ALLOWED_MCP_TOOLS = frozenset({"query_incident_tool", "query_inventory_tool"})
+
+
+# Hito 12, seguridad por diseño: "si algún componente genera llamadas a
+# herramientas, valida ese output ANTES de ejecutarlo". Los argumentos de
+# estas llamadas los arma `intent_extraction.py` a partir del TEXTO DEL
+# USUARIO (p. ej. cualquier número de la pregunta pasa a ser `incident_id`,
+# sin tope). El MCP Server también valida, pero del otro lado de la red y
+# con el token del agente: acá se rechaza antes de salir del proceso.
+class _QueryIncidentArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    incident_id: int | None = Field(default=None, ge=1, le=2_147_483_647)
+    status: Literal["open", "in_progress", "resolved", "discarded"] | None = None
+
+
+class _QueryInventoryArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str | None = Field(default=None, pattern=r"^[A-Z]{2,}(?:-[A-Z0-9]+){2,}$", max_length=40)
+
+
+class _ToolCall(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: dict[str, Any]
+
+
+_TOOL_ARGUMENT_SCHEMAS: dict[str, type[BaseModel]] = {
+    "query_incident_tool": _QueryIncidentArgs,
+    "query_inventory_tool": _QueryInventoryArgs,
+}
+
+
+def validate_tool_call(tool_name: str, args: dict[str, Any]) -> str | None:
+    """`None` si la llamada es válida; si no, el motivo (nunca se ejecuta)."""
+
+    if tool_name not in AGENT_ALLOWED_MCP_TOOLS:
+        return f"tool_not_allowed_for_agent:{tool_name}"
+    try:
+        call = _ToolCall.model_validate(args)
+        _TOOL_ARGUMENT_SCHEMAS[tool_name].model_validate(call.query)
+    except ValidationError as exc:
+        fields = ",".join(".".join(str(part) for part in error["loc"]) or "args" for error in exc.errors())
+        return f"invalid_tool_arguments:{tool_name}:{fields}"
+    return None
 
 
 def _auth_headers() -> dict[str, str]:
@@ -102,7 +158,14 @@ async def call_mcp_tool(
     scope faltante) se traduce en `{"ok": False, "error": "<mensaje>"}` a
     partir del `ToolMessage(status="error")` que MCP Auth ya documenta (ver
     `mcps/trackflow-mcp/scopes.py`).
+
+    Solo tools de `AGENT_ALLOWED_MCP_TOOLS` (lectura): cualquier otra se
+    rechaza ANTES de abrir conexión con el MCP Server.
     """
+
+    rejection = validate_tool_call(tool_name, args)
+    if rejection is not None:
+        return {"ok": False, "error": rejection}
 
     try:
         client = client_factory()

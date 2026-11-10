@@ -286,7 +286,7 @@ export function SuppliersDirectoryPanel() {
     <div className="suppliers-layout">
       <section className="card suppliers-hero-card">
         <div>
-          <div className="eyebrow">Hito 09 · Directorio de proveedores</div>
+          <div className="eyebrow">Directorio de proveedores</div>
           <h2 className="panel-title">Unifica carriers, embalaje, devoluciones y software operativo</h2>
           <p className="analysis-copy">
             Filtra por mercado o categoria, registra nuevos acuerdos y actualiza tarifas y estado sin recargar la pagina.
@@ -438,7 +438,7 @@ export function SuppliersDirectoryPanel() {
         <div className="section-header-row">
           <div>
             <h3 className="panel-title">Registrar proveedor nuevo</h3>
-            <p className="section-caption">El formulario consume POST /suppliers y muestra el error devuelto por la API si la entrada no es valida.</p>
+            <p className="section-caption">Si algun dato no es valido, el error aparece junto al formulario.</p>
           </div>
         </div>
 

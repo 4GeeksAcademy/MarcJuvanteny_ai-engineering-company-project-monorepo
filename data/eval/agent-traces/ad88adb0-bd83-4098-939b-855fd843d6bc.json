@@ -1,0 +1,53 @@
+[
+  {
+    "node": "receive_question",
+    "output": {
+      "question": "¿Cuál es la tarifa de UPS?"
+    }
+  },
+  {
+    "node": "input_guard",
+    "output": {}
+  },
+  {
+    "node": "classify_intent",
+    "output": {
+      "route": "rag"
+    }
+  },
+  {
+    "node": "retrieve_memory",
+    "output": {
+      "memory_context": []
+    }
+  },
+  {
+    "node": "retrieve",
+    "output": {
+      "context": [
+        {
+          "source_document": "x",
+          "section": "y",
+          "text": "contexto"
+        }
+      ]
+    }
+  },
+  {
+    "node": "generate",
+    "output": {
+      "answer": "La tarifa negociada con UPS es de 8.50 USD por paquete."
+    }
+  },
+  {
+    "node": "output_guard",
+    "output": {
+      "answer": "No puedo compartir ese detalle. Puedo ayudarte con el estado de un envío, políticas de devolución/SLA, o procedimientos de incidencias.",
+      "guardrail_name": "output_sensitive_data"
+    }
+  },
+  {
+    "node": "propose_memory",
+    "output": {}
+  }
+]

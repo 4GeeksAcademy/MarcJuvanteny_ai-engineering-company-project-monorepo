@@ -6,7 +6,7 @@ export default function SuppliersPage() {
     <BackofficeShell
       activeKey="suppliers"
       title="Directorio de proveedores"
-      subtitle="Consulta, filtra y actualiza el directorio operativo de USA y Spain sin salir del backoffice."
+      subtitle="Consulta, filtra y actualiza los proveedores de Los Angeles y Zaragoza."
     >
       <SuppliersDirectoryPanel />
     </BackofficeShell>

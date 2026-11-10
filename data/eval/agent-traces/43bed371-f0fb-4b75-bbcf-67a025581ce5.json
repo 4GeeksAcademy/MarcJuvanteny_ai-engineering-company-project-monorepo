@@ -1,0 +1,44 @@
+[
+  {
+    "node": "receive_question",
+    "output": {
+      "question": "¿algo totalmente fuera de la base de conocimiento?"
+    }
+  },
+  {
+    "node": "input_guard",
+    "output": {}
+  },
+  {
+    "node": "classify_intent",
+    "output": {
+      "route": "rag"
+    }
+  },
+  {
+    "node": "retrieve_memory",
+    "output": {
+      "memory_context": []
+    }
+  },
+  {
+    "node": "retrieve",
+    "output": {
+      "context": []
+    }
+  },
+  {
+    "node": "no_context",
+    "output": {
+      "answer": "No tengo información sobre eso en la base de conocimiento de TrackFlow."
+    }
+  },
+  {
+    "node": "output_guard",
+    "output": {}
+  },
+  {
+    "node": "propose_memory",
+    "output": {}
+  }
+]

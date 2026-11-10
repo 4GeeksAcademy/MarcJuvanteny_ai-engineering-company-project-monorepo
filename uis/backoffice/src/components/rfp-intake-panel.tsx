@@ -3,6 +3,7 @@
 import { ChangeEvent, DragEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { useAuth } from "@/lib/auth-context";
+import { RfpStreamState, RfpTicketCreatedEvent, useRfpTicketStream } from "@/lib/use-rfp-ticket-stream";
 
 type TicketStatus =
   | "analizando"
@@ -99,6 +100,39 @@ function statusBadgeClass(status: TicketStatus) {
   return "badge-pending";
 }
 
+// Hito 10 Parte 1: el payload de `rfp_ticket_created` ya trae lo necesario
+// para pintar el ticket -- se agrega a la lista tal cual, sin volver a pedir
+// `GET /rfp/tickets` en cada evento.
+function ticketDetailFromEvent(event: RfpTicketCreatedEvent): TicketDetail {
+  return {
+    ticket: {
+      id: event.ticket_id,
+      status: event.status,
+      discard_reason: null,
+      created_at: event.created_at,
+      updated_at: event.created_at,
+    },
+    metadata: {
+      client_name: event.client_name,
+      client_country: event.client_country,
+      services_requested: event.services_requested,
+      monthly_volume: null,
+      deadline: null,
+      budget_range: null,
+      departments_needed: [],
+    },
+    sections: [],
+    final_document: null,
+  };
+}
+
+function liveStatusLabel(state: RfpStreamState) {
+  if (state.status === "open") return "En vivo";
+  if (state.status === "connecting") return "Conectando...";
+  if (state.status === "unauthorized") return "Sin sesion -- vuelve a iniciar sesion";
+  return `Reconectando en ${Math.ceil(state.retryInMs / 1000)}s (intento ${state.attempt})`;
+}
+
 export function RfpIntakePanel() {
   const { authFetch } = useAuth();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -106,7 +140,9 @@ export function RfpIntakePanel() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [tickets, setTickets] = useState<TicketDetail[]>([]);
-  const pollingTicketIds = useRef<Set<number>>(new Set());
+  const knownTicketIds = useRef<Set<number>>(new Set());
+  const [newTicketIds, setNewTicketIds] = useState<Set<number>>(new Set());
+  const [lastArrival, setLastArrival] = useState<RfpTicketCreatedEvent | null>(null);
   const [approvalsByTicket, setApprovalsByTicket] = useState<Record<number, PendingApproval[]>>({});
   const [reasonDrafts, setReasonDrafts] = useState<Record<string, string>>({});
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -141,24 +177,69 @@ export function RfpIntakePanel() {
     if (!response.ok) return;
     const summaries = (await response.json()) as TicketDetail["ticket"][];
     const details = await Promise.all(summaries.map((summary) => fetchTicket(summary.id)));
-    setTickets(details.filter((detail): detail is TicketDetail => detail !== null));
+    const loaded = details.filter((detail): detail is TicketDetail => detail !== null);
+    for (const detail of loaded) knownTicketIds.current.add(detail.ticket.id);
+    // Fusiona en vez de reemplazar: un ticket llegado por SSE mientras esta
+    // respuesta viajaba no debe desaparecer de la UI (los tickets nunca se
+    // borran, así que lo que no vino en `loaded` es siempre más nuevo).
+    setTickets((prev) => {
+      const loadedIds = new Set(loaded.map((detail) => detail.ticket.id));
+      return [...prev.filter((detail) => !loadedIds.has(detail.ticket.id)), ...loaded];
+    });
   }, [authFetch, fetchTicket]);
 
   useEffect(() => {
     void refreshTicketList();
   }, [refreshTicketList]);
 
-  // Polling: mientras haya tickets en "analizando", refresca cada 2s --
-  // CONTEXT9.md: "la UI consulta/refresca estado (analizando -> analisis_completo o descartado)".
+  // Hito 10 Parte 1: un ticket nuevo llega por SSE. Dedupe por `ticket_id`
+  // (`knownTicketIds`): el mismo ticket puede llegar por la lista inicial,
+  // por un replay tras reconectar (Last-Event-ID) o porque lo subió esta
+  // misma pestaña -- en cualquier caso aparece una sola vez en la UI.
+  const onTicketCreated = useCallback((event: RfpTicketCreatedEvent) => {
+    if (knownTicketIds.current.has(event.ticket_id)) return;
+    knownTicketIds.current.add(event.ticket_id);
+    setTickets((prev) =>
+      prev.some((detail) => detail.ticket.id === event.ticket_id) ? prev : [ticketDetailFromEvent(event), ...prev]
+    );
+    setNewTicketIds((prev) => new Set(prev).add(event.ticket_id));
+    setLastArrival(event);
+  }, []);
+
+  // Primera apertura del stream: un refresco de la lista cierra el hueco
+  // entre la carga inicial y el momento en que el stream quedó escuchando.
+  // Las reconexiones posteriores NO refrescan -- de eso se encarga el
+  // replay por Last-Event-ID en el servidor.
+  const streamState = useRfpTicketStream({ onTicketCreated, onFirstOpen: () => void refreshTicketList() });
+
+  function dismissNewTickets() {
+    setNewTicketIds(new Set());
+    setLastArrival(null);
+  }
+
+  // Polling: mientras haya tickets procesandose en segundo plano
+  // ("analizando" o "generando_borrador"), refresca cada 2s SOLO esos tickets
+  // (no la lista entera) -- CONTEXT9.md: "la UI consulta/refresca estado".
+  // El stream SSE anuncia la llegada; el avance de estado posterior sigue por
+  // acá. Sin "generando_borrador", la pantalla se quedaba en "Generando
+  // propuesta..." aunque el worker ya hubiera terminado.
   useEffect(() => {
-    const stillAnalyzing = tickets.some((detail) => detail.ticket.status === "analizando");
-    if (!stillAnalyzing) return;
+    const analyzingIds = tickets
+      .filter((detail) => detail.ticket.status === "analizando" || detail.ticket.status === "generando_borrador")
+      .map((detail) => detail.ticket.id);
+    if (analyzingIds.length === 0) return;
 
     const interval = setInterval(() => {
-      void refreshTicketList();
+      void (async () => {
+        const refreshed = await Promise.all(analyzingIds.map((id) => fetchTicket(id)));
+        const byId = new Map(
+          refreshed.filter((detail): detail is TicketDetail => detail !== null).map((detail) => [detail.ticket.id, detail])
+        );
+        setTickets((prev) => prev.map((detail) => byId.get(detail.ticket.id) ?? detail));
+      })();
     }, 2000);
     return () => clearInterval(interval);
-  }, [tickets, refreshTicketList]);
+  }, [tickets, fetchTicket]);
 
   const loadApprovalRound = useCallback(
     async (ticketId: number) => {
@@ -264,8 +345,8 @@ export function RfpIntakePanel() {
   return (
     <div className="analysis-grid">
       <section className="card analysis-intro-card">
-        <div className="eyebrow">Hito 09 - Parte 1 - Recepcion de RFPs</div>
-        <h2 className="panel-title">Sube una RFP en PDF y segui su ticket en tiempo real</h2>
+        <div className="eyebrow">Recepcion de RFPs</div>
+        <h2 className="panel-title">Sube una RFP en PDF y sigue su ticket en tiempo real</h2>
         <p className="analysis-copy">
           Se crea un ticket por cada PDF subido. El analisis (conversion, clasificacion, y reparto
           por departamento) corre en segundo plano -- esta pantalla se refresca sola mientras el
@@ -304,8 +385,30 @@ export function RfpIntakePanel() {
         <div className="section-header-row">
           <div>
             <h3 className="panel-title">Tickets</h3>
-            <p className="section-caption">Mas reciente primero. Click en un ticket para ver su detalle.</p>
+            <p className="section-caption">Mas reciente primero. Las RFP nuevas aparecen solas, sin recargar.</p>
           </div>
+          <span className="rfp-live-pill" data-state={streamState.status} role="status">
+            {liveStatusLabel(streamState)}
+          </span>
+        </div>
+
+        <div aria-live="polite">
+          {lastArrival ? (
+            <div className="rfp-arrival-banner">
+              <span>
+                <strong>Nueva RFP{newTicketIds.size > 1 ? ` (+${newTicketIds.size - 1} mas)` : ""}:</strong>{" "}
+                Ticket #{lastArrival.ticket_id}
+                {lastArrival.client_name ? ` -- ${lastArrival.client_name}` : ""}
+                {lastArrival.client_country ? ` (${lastArrival.client_country})` : ""}
+                {lastArrival.services_requested.length > 0
+                  ? ` -- ${lastArrival.services_requested.map((id) => DEPARTMENT_LABELS[id] ?? id).join(", ")}`
+                  : ""}
+              </span>
+              <button type="button" className="secondary-button" onClick={dismissNewTickets}>
+                Marcar como vistas
+              </button>
+            </div>
+          ) : null}
         </div>
 
         {tickets.length === 0 ? (
@@ -313,9 +416,14 @@ export function RfpIntakePanel() {
         ) : (
           <ul className="summary-list">
             {tickets.map((detail) => (
-              <li key={detail.ticket.id} style={{ flexDirection: "column", alignItems: "stretch", gap: "0.5rem" }}>
+              <li
+                key={detail.ticket.id}
+                className={newTicketIds.has(detail.ticket.id) ? "rfp-ticket-new" : undefined}
+                style={{ flexDirection: "column", alignItems: "stretch", gap: "0.5rem" }}
+              >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span>
+                    {newTicketIds.has(detail.ticket.id) ? <span className="rfp-new-badge">Nueva</span> : null}
                     Ticket #{detail.ticket.id}
                     {detail.metadata?.client_name ? ` -- ${detail.metadata.client_name}` : ""}
                   </span>
@@ -389,10 +497,7 @@ export function RfpIntakePanel() {
                       approvalsByTicket[detail.ticket.id].map((approval) => {
                         const reasonKey = `${detail.ticket.id}:${approval.department_id}`;
                         return (
-                          <div
-                            key={approval.department_id}
-                            style={{ border: "1px solid var(--border, #333)", borderRadius: "8px", padding: "0.75rem" }}
-                          >
+                          <div key={approval.department_id} className="approval-card">
                             <div style={{ display: "flex", justifyContent: "space-between" }}>
                               <strong>{DEPARTMENT_LABELS[approval.department_id] ?? approval.department_id}</strong>
                               <span>Responsable: {approval.approver}</span>
@@ -404,7 +509,7 @@ export function RfpIntakePanel() {
                               onChange={(event) =>
                                 setReasonDrafts((prev) => ({ ...prev, [reasonKey]: event.target.value }))
                               }
-                              style={{ width: "100%", minHeight: "3rem" }}
+                              className="plain-textarea"
                             />
                             <div className="analysis-actions">
                               <button
@@ -425,7 +530,7 @@ export function RfpIntakePanel() {
                               </button>
                               <button
                                 type="button"
-                                className="secondary-button"
+                                className="secondary-button danger-button"
                                 disabled={busyAction === `reject:${detail.ticket.id}:${approval.department_id}`}
                                 onClick={() => submitDecision(detail.ticket.id, approval.department_id, "reject")}
                               >

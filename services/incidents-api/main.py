@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,7 +9,7 @@ from time import monotonic
 from typing import Any
 
 from celery.result import AsyncResult
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -66,6 +67,7 @@ from models import (
 from password_reset_service import confirm_password_reset, request_password_reset
 from routers.inventory import router as inventory_router, seed_inventory_if_empty
 from routers.rfp import router as rfp_router
+from routers.rfp_events import router as rfp_events_router
 from routers.telemetry import router as telemetry_router
 from tasks import analyze_incidents_csv_task
 from user_service import (
@@ -115,6 +117,7 @@ app.add_middleware(
 app.include_router(inventory_router)
 app.include_router(telemetry_router)
 app.include_router(rfp_router)
+app.include_router(rfp_events_router)
 
 
 @app.on_event("startup")
@@ -221,6 +224,27 @@ def get_current_user(
 ) -> UserWithProfileRecord:
     token = _require_bearer_token(credentials)
     return get_user_from_token(get_suppliers_db_path(), token)
+
+
+audit_logger = logging.getLogger("incidents_api.audit")
+
+CONFIRM_ACTION_HEADER = "X-Confirm-Action"
+
+
+def require_explicit_confirmation(expected: str, provided: str | None) -> None:
+    """Hito 12 (acciones irreversibles con confirmación humana explícita):
+    un borrado solo se ejecuta si la petición repite, en `X-Confirm-Action`,
+    la acción y el id exactos (p. ej. `delete-supplier:7`). Un DELETE
+    accidental, reintentado por un proxy o encadenado por un script que no
+    lo pidió a propósito se rechaza con 428 y no borra nada. Ningún agente
+    llega a estos endpoints (allowlist de tools de solo lectura en
+    services/knowledge-api/mcp_client.py)."""
+
+    if provided != expected:
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail=f"Irreversible action: repeat the request with header {CONFIRM_ACTION_HEADER}: {expected}",
+        )
 
 
 def ensure_self_or_admin(actor: UserWithProfileRecord, user_id: int) -> None:
@@ -434,9 +458,11 @@ async def update_supplier_status(
 async def delete_supplier(
     supplier_id: int,
     current_user: UserWithProfileRecord = Depends(get_current_user),
+    confirm_action: str | None = Header(default=None, alias=CONFIRM_ACTION_HEADER),
 ) -> MessageResponse:
-    _ = current_user
     get_supplier_document_or_404(supplier_id)
+    require_explicit_confirmation(f"delete-supplier:{supplier_id}", confirm_action)
+    audit_logger.info("supplier %s deleted by user %s (confirmed)", supplier_id, current_user.id)
 
     with TinyDB(get_suppliers_db_path()) as db:
         suppliers_table = db.table("suppliers")
@@ -596,7 +622,18 @@ async def update_incident_status(
 
 
 @app.post("/users", response_model=UserPublicRecord, status_code=status.HTTP_201_CREATED)
-async def create_user(payload: UserRegister) -> UserPublicRecord:
+async def create_user(
+    payload: UserRegister,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> UserPublicRecord:
+    # Auditoría OWASP A01 (Pasos/owasp-auditoria-hardening.md, C1): el alta
+    # sigue siendo pública para el rol base (register-form.tsx), pero un
+    # rol privilegiado solo lo puede asignar un admin autenticado -- antes
+    # cualquiera se registraba con {"role": "admin"} sin token.
+    if payload.role != UserRole.USER:
+        actor = get_current_user(credentials)
+        if actor.role != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="Only admins can create users with a privileged role.")
     created_user = create_user_service(get_suppliers_db_path(), payload)
     return _to_user_public_record(created_user)
 
@@ -651,8 +688,11 @@ async def update_user(
 async def delete_user(
     user_id: int,
     current_user: UserWithProfileRecord = Depends(get_current_user),
+    confirm_action: str | None = Header(default=None, alias=CONFIRM_ACTION_HEADER),
 ) -> MessageResponse:
     ensure_self_or_admin(current_user, user_id)
+    require_explicit_confirmation(f"delete-user:{user_id}", confirm_action)
+    audit_logger.info("user %s deleted by user %s (confirmed)", user_id, current_user.id)
     delete_user_service(get_suppliers_db_path(), user_id)
     _invalidate_auth_me_cache_for_user(user_id)
     return MessageResponse(message="User deleted successfully.")

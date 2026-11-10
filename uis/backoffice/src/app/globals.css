@@ -1,17 +1,48 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f4f7fb;
+  --background: #eaeff6;
   --foreground: #152238;
   --ink: #152238;
   --muted: #4a5a73;
   --surface: #ffffff;
-  --line: #dbe4f0;
+  --line: #d3dde9;
   --accent: #0f6db6;
   --accent-soft: #e8f3ff;
   --ok: #0f8a5f;
   --warn: #c6670a;
   --pending: #3f5e8a;
+
+  /* Identidad TrackFlow: mismo naranja que uis/website (--orange). Solo para
+     acentos pequenos (marca, indicador activo, guiones de eyebrow), nunca para
+     texto largo: sobre blanco no llega a 4.5:1. */
+  --brand-orange: #e8640c;
+  --brand-orange-bright: #ff7a20;
+
+  --accent-strong: #0b5a96;
+  --accent-line: rgba(15, 109, 182, 0.45);
+  --surface-soft: #fbfdff;
+  --surface-sunken: #f2f6fb;
+  --info-bg: #eef5fc;
+  --info-fg: #25527d;
+  --ok-bg: #e7f8f1;
+  --warn-bg: #fff2e6;
+  --pending-bg: #e9f0fb;
+  --danger: #b3261e;
+  --danger-bg: #fdecea;
+  --error-fg: #a54711;
+  --error-bg: #fff1e8;
+  --error-line: #ffd5be;
+  --success-fg: #0d6b49;
+  --success-bg: #e8f8f0;
+  --success-line: #c2ead5;
+
+  /* Profundidad: fondo < tarjeta < tarjeta anidada / campo. */
+  --input-bg: #ffffff;
+  --table-head: #f3f6fb;
+  --row-hover: #f5f9ff;
+  --shadow-card: 0 1px 2px rgba(16, 34, 64, 0.06), 0 4px 14px rgba(16, 34, 64, 0.06);
+  --shadow-raised: 0 2px 6px rgba(16, 34, 64, 0.08), 0 12px 28px rgba(16, 34, 64, 0.1);
 }
 
 @theme inline {
@@ -41,14 +72,44 @@ body {
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   font-family: var(--font-space-grotesk), sans-serif;
   font-size: 1.1rem;
+  font-weight: 700;
   letter-spacing: -0.02em;
   margin-bottom: 1.5rem;
 }
 
-.brand span {
-  color: #7cc4ff;
+.brand-mark {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.brand-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* "Flow" en naranja, como el logo de uis/website. */
+.brand-flow {
+  color: var(--brand-orange-bright);
+}
+
+.brand-product {
+  display: block;
+  font-family: var(--font-dm-sans), sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(232, 243, 255, 0.6);
 }
 
 .sidebar nav {
@@ -67,9 +128,18 @@ body {
   text-decoration: none;
 }
 
+.sidebar-item:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+/* Indicador naranja de la seccion activa. */
 .sidebar-item.active {
   border-color: rgba(124, 196, 255, 0.62);
   background: rgba(124, 196, 255, 0.14);
+  box-shadow: inset 3px 0 0 var(--brand-orange-bright);
+  color: #ffffff;
+  font-weight: 600;
 }
 
 .content {
@@ -146,31 +216,17 @@ body {
 
 .badge-ok {
   color: var(--ok);
-  background: #e7f8f1;
+  background: var(--ok-bg);
 }
 
 .badge-warn {
   color: var(--warn);
-  background: #fff2e6;
+  background: var(--warn-bg);
 }
 
 .badge-pending {
   color: var(--pending);
-  background: #e9f0fb;
-}
-
-@media (prefers-color-scheme: dark) {
-  .badge-ok {
-    background: #0f2a22;
-  }
-
-  .badge-warn {
-    background: #2e2110;
-  }
-
-  .badge-pending {
-    background: #182438;
-  }
+  background: var(--pending-bg);
 }
 
 .list {
@@ -194,11 +250,24 @@ body {
 }
 
 .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   font-size: 0.74rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--accent);
+}
+
+/* Guion naranja delante del eyebrow, mismo recurso que .section-label en
+   uis/website. */
+.eyebrow::before {
+  content: "";
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--brand-orange);
 }
 
 .analysis-copy,
@@ -213,7 +282,7 @@ body {
   padding: 1.2rem;
   border: 1px dashed rgba(15, 109, 182, 0.35);
   border-radius: 18px;
-  background: linear-gradient(135deg, #eef6ff 0%, #ffffff 100%);
+  background: linear-gradient(135deg, var(--accent-soft) 0%, var(--surface) 100%);
   cursor: pointer;
   transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
@@ -270,32 +339,98 @@ body {
   padding: 0.7rem 1rem;
   font-weight: 700;
   text-decoration: none;
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.2s ease;
 }
 
 .primary-button {
   background: var(--accent);
-  color: white;
-  border: 0;
+  color: #ffffff;
+  border: 1px solid var(--accent);
 }
 
+/* Secundario = contorno en color de accion. Antes era fondo blanco fijo con
+   texto var(--foreground): en modo oscuro quedaba texto casi blanco sobre
+   blanco y el boton parecia deshabilitado aunque funcionara. */
 .secondary-button {
-  border: 1px solid var(--line);
-  background: white;
-  color: var(--foreground);
+  border: 1px solid var(--accent-line);
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.primary-button:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+@media (prefers-color-scheme: dark) {
+  .primary-button {
+    color: #06121f;
+  }
+}
+
+.secondary-button:hover:not(:disabled):not(.disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* Variante para acciones destructivas (Rechazar, Descartar...). */
+.secondary-button.danger-button {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.secondary-button.danger-button:hover:not(:disabled) {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+
+/* El estado deshabilitado tiene que verse distinto del activo: antes solo la
+   clase .disabled lo marcaba, y un secondary-button con el atributo disabled
+   se veia igual que uno operativo. */
+.primary-button:disabled,
+.secondary-button:disabled,
+.secondary-button.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: saturate(0.4);
 }
 
 .primary-button:disabled,
 .secondary-button.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
   pointer-events: none;
 }
 
+/* Foco visible con teclado en todos los controles interactivos. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.plain-textarea {
+  width: 100%;
+  min-height: 3rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+}
+
+.approval-card {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: var(--surface-soft);
+}
+
 .feedback-error {
-  color: #a54711;
-  background: #fff1e8;
-  border: 1px solid #ffd5be;
+  color: var(--error-fg);
+  background: var(--error-bg);
+  border: 1px solid var(--error-line);
   border-radius: 12px;
   padding: 0.8rem 0.9rem;
 }
@@ -355,7 +490,7 @@ body {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 0.8rem 0.95rem;
-  background: #fbfdff;
+  background: var(--surface-soft);
 }
 
 .summary-list li span {
@@ -368,13 +503,13 @@ body {
 }
 
 .summary-list-compact li {
-  background: white;
+  background: var(--surface);
 }
 
 .feedback-success {
-  color: #0d6b49;
-  background: #e8f8f0;
-  border: 1px solid #c2ead5;
+  color: var(--success-fg);
+  background: var(--success-bg);
+  border: 1px solid var(--success-line);
   border-radius: 12px;
   padding: 0.8rem 0.9rem;
 }
@@ -387,7 +522,7 @@ body {
 .suppliers-hero-card {
   display: grid;
   gap: 1.25rem;
-  background: linear-gradient(135deg, #ffffff 0%, #edf6ff 65%, #fff7ef 100%);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--accent-soft) 65%, var(--warn-bg) 100%);
 }
 
 .suppliers-summary-strip {
@@ -400,7 +535,7 @@ body {
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 1rem;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--surface);
   display: grid;
   gap: 0.35rem;
 }
@@ -464,7 +599,7 @@ body {
 }
 
 .field-block input[readonly] {
-  background: #f2f6fb;
+  background: var(--surface-sunken);
 }
 
 .field-block-wide {
@@ -497,7 +632,7 @@ body {
 }
 
 .supplier-row-muted {
-  background: #fff9f2;
+  background: var(--warn-bg);
 }
 
 .supplier-name-cell {
@@ -523,8 +658,8 @@ body {
 .category-chip {
   border-radius: 999px;
   padding: 0.28rem 0.7rem;
-  background: #eef5fc;
-  color: #25527d;
+  background: var(--info-bg);
+  color: var(--info-fg);
   font-size: 0.76rem;
   font-weight: 700;
 }
@@ -539,6 +674,8 @@ body {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 0.55rem 0.65rem;
+  background: var(--surface);
+  color: var(--foreground);
 }
 
 .rate-editor span {
@@ -556,12 +693,12 @@ body {
 }
 
 .status-badge-active {
-  background: #e7f8f1;
+  background: var(--ok-bg);
   color: var(--ok);
 }
 
 .status-badge-suspended {
-  background: #fff2e6;
+  background: var(--warn-bg);
   color: var(--warn);
 }
 
@@ -606,7 +743,8 @@ body {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 0.55rem 0.85rem;
-  background: white;
+  background: var(--surface);
+  color: var(--foreground);
   cursor: pointer;
 }
 
@@ -615,8 +753,8 @@ body {
 }
 
 .category-toggle.checked {
-  border-color: rgba(15, 109, 182, 0.42);
-  background: #edf6ff;
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
 }
 
 .supplier-form-actions {
@@ -625,32 +763,32 @@ body {
 }
 
 .status-badge-open {
-  background: #eef5fc;
-  color: #25527d;
+  background: var(--info-bg);
+  color: var(--info-fg);
 }
 
 .status-badge-in-progress {
-  background: #fff2e6;
+  background: var(--warn-bg);
   color: var(--warn);
 }
 
 .status-badge-resolved {
-  background: #e7f8f1;
+  background: var(--ok-bg);
   color: var(--ok);
 }
 
 .status-badge-discarded {
-  background: #fdecea;
-  color: #b3261e;
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 .status-badge-low-stock {
-  background: #fff2e6;
+  background: var(--warn-bg);
   color: var(--warn);
 }
 
 .status-badge-healthy-stock {
-  background: #e7f8f1;
+  background: var(--ok-bg);
   color: var(--ok);
 }
 
@@ -658,7 +796,7 @@ body {
   border: 1px solid rgba(198, 103, 10, 0.4);
   border-radius: 12px;
   padding: 0.75rem;
-  background: #fff8f0;
+  background: var(--warn-bg);
 }
 
 .topbar-row {
@@ -723,24 +861,24 @@ body {
 }
 
 .field-error {
-  color: #a54711;
+  color: var(--error-fg);
   font-size: 0.8rem;
   font-weight: 600;
 }
 
 .field-warning {
-  color: #9a5700;
+  color: var(--warn);
   font-size: 0.8rem;
   font-weight: 600;
 }
 
 .movement-badge-inbound {
-  background: #e7f8f1;
+  background: var(--ok-bg);
   color: var(--ok);
 }
 
 .movement-badge-outbound {
-  background: #fff2e6;
+  background: var(--warn-bg);
   color: var(--warn);
 }
 
@@ -782,17 +920,41 @@ body {
    ninguna otra regla. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0b1220;
+    --background: #060b16;
     --foreground: #e7edf7;
     --ink: #e7edf7;
-    --muted: #93a4c2;
-    --surface: #131b2e;
-    --line: #26344d;
+    --muted: #9fb0cc;
+    --surface: #121c31;
+    --line: #2b3b58;
     --accent: #4ea6e8;
     --accent-soft: #16283d;
     --ok: #3ddb9b;
     --warn: #f0a04b;
     --pending: #7fa8e0;
+
+    --accent-strong: #7cc0f2;
+    --accent-line: rgba(78, 166, 232, 0.55);
+    --surface-soft: #19253f;
+    --surface-sunken: #0b1324;
+    --info-bg: #182438;
+    --info-fg: #a9c8ee;
+    --ok-bg: #0f2a22;
+    --warn-bg: #2e2110;
+    --pending-bg: #182438;
+    --danger: #ff8a80;
+    --danger-bg: #3a1614;
+    --error-fg: #ffb48a;
+    --error-bg: #2e1a10;
+    --error-line: #5c3418;
+    --success-fg: #6fe3b4;
+    --success-bg: #0f2a22;
+    --success-line: #1f5240;
+
+    --input-bg: #0b1324;
+    --table-head: #172340;
+    --row-hover: #16223b;
+    --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 6px 18px rgba(0, 0, 0, 0.45);
+    --shadow-raised: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 14px 34px rgba(0, 0, 0, 0.55);
   }
 }
 
@@ -846,4 +1008,483 @@ body {
   font-size: 0.95rem;
   line-height: 1.55;
   white-space: pre-wrap;
+}
+
+/* Hito 10 Parte 1 (CONTEXT10.md): notificacion en tiempo real de tickets de
+   RFP nuevos (stream SSE). Solo tokens de :root, asi que el modo oscuro sale
+   gratis. */
+.rfp-live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  padding: 0.2rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.rfp-live-pill::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.rfp-live-pill[data-state="open"] {
+  color: var(--ok);
+}
+
+.rfp-live-pill[data-state="open"]::before {
+  animation: rfp-live-dot 2s ease-in-out infinite;
+}
+
+.rfp-live-pill[data-state="reconnecting"],
+.rfp-live-pill[data-state="unauthorized"] {
+  color: var(--warn);
+}
+
+.rfp-arrival-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  border: 1px solid var(--accent);
+  border-left-width: 4px;
+  border-radius: 12px;
+  padding: 0.7rem 0.95rem;
+  background: var(--accent-soft);
+  color: var(--ink);
+  animation: rfp-arrival-in 260ms ease-out;
+}
+
+.summary-list li.rfp-ticket-new {
+  border-color: var(--accent);
+  border-left-width: 4px;
+  background: var(--accent-soft);
+  animation: rfp-arrival-in 260ms ease-out;
+}
+
+.summary-list li .rfp-new-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.5rem;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--surface);
+  background: var(--accent);
+}
+
+@keyframes rfp-arrival-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes rfp-live-dot {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rfp-arrival-banner,
+  .summary-list li.rfp-ticket-new,
+  .rfp-live-pill[data-state="open"]::before {
+    animation: none;
+  }
+}
+
+/* Hito 10 Parte 2 (CONTEXT10.md): chat por WebSocket con el First-line CX
+   agent. Solo tokens de :root (modo oscuro automatico). */
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.chat-connection-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  padding: 0.2rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.chat-connection-pill::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.chat-connection-pill[data-state="open"] {
+  color: var(--ok);
+}
+
+.chat-connection-pill[data-state="reconnecting"],
+.chat-connection-pill[data-state="unauthorized"] {
+  color: var(--warn);
+}
+
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 16rem;
+  max-height: 60dvh;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.85rem;
+  background: var(--background);
+}
+
+.chat-message {
+  max-width: min(85%, 42rem);
+  border-radius: 12px;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.chat-message-user {
+  align-self: flex-end;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.chat-message-assistant {
+  align-self: flex-start;
+}
+
+.chat-message[data-status="interrupted"] {
+  border-style: dashed;
+  border-color: var(--warn);
+}
+
+.chat-message[data-status="interrupted"] .chat-message-text {
+  color: var(--muted);
+}
+
+.chat-message-text {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.chat-message-tag {
+  display: inline-block;
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--warn);
+}
+
+.chat-caret {
+  display: inline-block;
+  width: 0.5ch;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: chat-caret-blink 1s steps(2, start) infinite;
+}
+
+.chat-thinking {
+  justify-self: start;
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  opacity: 0.8;
+  animation: chat-thinking-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes chat-thinking-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.chat-composer {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.chat-composer textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.chat-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+@keyframes chat-caret-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-caret,
+  .chat-thinking {
+    animation: none;
+  }
+}
+
+/* Resumen: recomendacion (ancha) y validaciones (estrecha) en la misma fila. */
+.home-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.home-category-chips {
+  margin-top: 0.8rem;
+}
+
+/* Rejillas de filtros / metricas (sustituyen estilos inline fijos que no
+   se adaptaban a pantallas estrechas). */
+.filters-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.summary-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* Secciones plegables (<details>): titulo + resumen siempre visibles, el
+   detalle solo al desplegar. */
+.collapsible-card > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.collapsible-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-card > summary::after {
+  content: "";
+  flex-shrink: 0;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+}
+
+.collapsible-card[open] > summary::after {
+  transform: rotate(-135deg);
+}
+
+.collapsible-card[open] > summary {
+  margin-bottom: 1rem;
+}
+
+.collapsible-card > summary:hover .panel-title {
+  color: var(--accent);
+}
+
+.collapsible-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.collapsible-heading .panel-title {
+  margin-bottom: 0;
+}
+
+.collapsible-headline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+@media (max-width: 1200px) {
+  .summary-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 980px) {
+  .home-detail-grid,
+  .filters-grid-3,
+  .summary-grid-4 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------------------------------------------------------------
+   Contraste y profundidad. Tres niveles claros: fondo de pagina < tarjeta <
+   elementos dentro de la tarjeta (stat cards, cabeceras de tabla, campos).
+   ------------------------------------------------------------------------ */
+.card {
+  box-shadow: var(--shadow-card);
+}
+
+.topbar {
+  position: relative;
+  z-index: 1;
+  box-shadow: var(--shadow-card);
+}
+
+.topbar h1 {
+  font-weight: 700;
+}
+
+.panel-title {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* KPIs del resumen: etiqueta pequena en mayusculas + cifra grande y una
+   franja de color arriba para darles jerarquia. */
+.cards .card {
+  border-top: 3px solid var(--accent);
+}
+
+.card h2 {
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.metric {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* Tarjetas dentro de tarjetas: otro tono, no el mismo que su contenedor. */
+.supplier-stat-card {
+  background: var(--surface-soft);
+}
+
+.supplier-stat-card strong {
+  color: var(--ink);
+}
+
+/* Campos de formulario hundidos respecto a la tarjeta. */
+.field-block input,
+.field-block select,
+.field-block textarea,
+.rate-editor input,
+.chat-composer textarea,
+.plain-textarea,
+.suppliers-table select {
+  background: var(--input-bg);
+  border-color: var(--line);
+}
+
+.suppliers-table select {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.45rem 0.6rem;
+  color: var(--foreground);
+}
+
+.field-block input:hover,
+.field-block select:hover,
+.field-block textarea:hover {
+  border-color: var(--accent-line);
+}
+
+/* Tablas: cabecera con fondo propio y filas que reaccionan al raton. */
+.suppliers-table thead th {
+  background: var(--table-head);
+  color: var(--muted);
+}
+
+.suppliers-table thead th:first-child {
+  border-top-left-radius: 10px;
+}
+
+.suppliers-table thead th:last-child {
+  border-top-right-radius: 10px;
+}
+
+.suppliers-table tbody tr {
+  transition: background-color 0.12s ease;
+}
+
+.suppliers-table tbody tr:hover {
+  background: var(--row-hover);
+}
+
+.suppliers-table td strong {
+  color: var(--ink);
+}
+
+/* Desplegables: un poco mas de relieve al abrirse. */
+.collapsible-card[open] {
+  box-shadow: var(--shadow-raised);
+}
+
+/* Chat: el area de mensajes hundida, burbujas por encima. */
+.chat-messages {
+  background: var(--surface-sunken);
+}
+
+.chat-message {
+  box-shadow: var(--shadow-card);
+}
+
+/* Barra lateral separada del contenido por sombra y fija al hacer scroll:
+   ocupa la altura de la ventana y, si el menu no cabe, hace scroll propio. */
+.sidebar {
+  box-shadow: 4px 0 18px rgba(0, 0, 0, 0.18);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  align-self: start;
+  height: 100dvh;
+  overflow-y: auto;
+}
+
+/* En pantallas estrechas la barra va encima del contenido: sin fijarla. */
+@media (max-width: 980px) {
+  .sidebar {
+    position: relative;
+    height: auto;
+    overflow-y: visible;
+  }
 }

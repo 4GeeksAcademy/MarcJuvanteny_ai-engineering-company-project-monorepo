@@ -1,0 +1,15 @@
+Reverse proxy nginx/1.24 (infra/hardening/nginx-trackflow.conf) en ubuntu:24.04 (172.17.0.2), certificado autofirmado de prueba
+
+--- http://  (debe redirigir a https):
+HTTP 301 -> https://trackflow.example.com/rfp
+--- https:// TLS + cabeceras (backend apagado -> 502; lo que se comprueba es TLS y cabeceras):
+HTTP/2 502 
+server: nginx
+strict-transport-security: max-age=31536000; includeSubDomains
+x-content-type-options: nosniff
+x-frame-options: DENY
+referrer-policy: strict-origin-when-cross-origin
+--- protocolo negociado:
+SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+--- forzando TLS <= 1.1 (debe rechazarse):
+exit=35 (35 = handshake rechazado)

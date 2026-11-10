@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -13,11 +11,17 @@ from dotenv import load_dotenv
 from fastapi import HTTPException, status
 from jwt import InvalidTokenError
 
-from user_service import get_user_by_email, get_user_by_id
+from models import UserCredentialsUpdate
+from password_hashing import needs_rehash
+from password_hashing import verify_password as _verify_password_hash
+from user_service import get_user_by_email, get_user_by_id, update_user
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 ALGORITHM = "HS256"
+
+
+MIN_JWT_SECRET_LENGTH = 32
 
 
 def _get_jwt_secret() -> str:
@@ -26,6 +30,15 @@ def _get_jwt_secret() -> str:
         raise HTTPException(
             status_code=500,
             detail="JWT_SECRET_KEY is not configured.",
+        )
+    # Hito 12 (credenciales): HS256 con un secreto corto se fuerza por
+    # diccionario/fuerza bruta offline a partir de UN token capturado. RFC 7518
+    # §3.2: clave >= tamaño del hash (256 bits). Falla cerrado: sin secreto
+    # válido no se emite ni se acepta ningún token.
+    if len(secret) < MIN_JWT_SECRET_LENGTH:
+        raise HTTPException(
+            status_code=500,
+            detail=f"JWT_SECRET_KEY must be at least {MIN_JWT_SECRET_LENGTH} characters.",
         )
     return secret
 
@@ -60,16 +73,8 @@ def get_reset_token_expire_minutes() -> int:
 
 
 def verify_password(plain_password: str, stored_hash: str) -> bool:
-    if not stored_hash.startswith("sha256$"):
-        return False
-
-    parts = stored_hash.split("$", 2)
-    if len(parts) != 3:
-        return False
-
-    _, salt, expected_digest = parts
-    computed_digest = hashlib.sha256(f"{salt}:{plain_password}".encode("utf-8")).hexdigest()
-    return hmac.compare_digest(computed_digest, expected_digest)
+    # scrypt + compatibilidad con el sha256 heredado -- ver password_hashing.py.
+    return _verify_password_hash(plain_password, stored_hash)
 
 
 def authenticate_user(db_path: Path, email: str, password: str):
@@ -82,6 +87,10 @@ def authenticate_user(db_path: Path, email: str, password: str):
 
     if not verify_password(password, user.hashed_password):
         return None
+
+    if needs_rehash(user.hashed_password):
+        # Migración transparente sha256 -> scrypt en el primer login correcto.
+        update_user(db_path, user.id, UserCredentialsUpdate(password=password))
 
     return user
 

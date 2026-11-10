@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import hashlib
-import secrets
 from pathlib import Path
 
 from fastapi import HTTPException
 from tinydb import TinyDB
 from tinydb.table import Document
 
+from password_hashing import hash_password
 from models import (
     ProfileUpdate,
     ProfileRecord,
@@ -34,9 +33,8 @@ def profile_document_to_record(document: Document) -> ProfileRecord:
 
 
 def _hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    digest = hashlib.sha256(f"{salt}:{password}".encode("utf-8")).hexdigest()
-    return f"sha256${salt}${digest}"
+    # scrypt (OWASP A02) -- ver password_hashing.py; antes sha256 de una pasada.
+    return hash_password(password)
 
 
 def _find_user_document_by_email(users_table, email: str) -> Document | None:

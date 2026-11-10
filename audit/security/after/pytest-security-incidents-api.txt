@@ -1,0 +1,13 @@
+../../tests/services/test_security_incidents_api.py::test_anonymous_cannot_self_register_as_admin PASSED
+../../tests/services/test_security_incidents_api.py::test_non_admin_cannot_create_privileged_users PASSED
+../../tests/services/test_security_incidents_api.py::test_public_signup_still_works_for_the_base_role PASSED
+../../tests/services/test_security_incidents_api.py::test_admin_can_still_create_privileged_users PASSED
+../../tests/services/test_security_incidents_api.py::test_reads_require_jwt[/inventory/products] PASSED
+../../tests/services/test_security_incidents_api.py::test_reads_require_jwt[/inventory/products/1] PASSED
+../../tests/services/test_security_incidents_api.py::test_reads_require_jwt[/inventory/orders] PASSED
+../../tests/services/test_security_incidents_api.py::test_reads_require_jwt[/telemetry/report] PASSED
+../../tests/services/test_security_incidents_api.py::test_authenticated_reads_keep_working PASSED
+../../tests/services/test_security_incidents_api.py::test_new_passwords_use_scrypt_not_a_fast_hash PASSED
+../../tests/services/test_security_incidents_api.py::test_legacy_sha256_hash_is_upgraded_to_scrypt_on_login PASSED
+../../tests/services/test_security_incidents_api.py::test_uploaded_filename_cannot_escape_the_upload_dir PASSED
+============================== 12 passed in 2.57s ==============================

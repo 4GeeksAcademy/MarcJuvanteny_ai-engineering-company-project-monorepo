@@ -6,7 +6,7 @@ export default function IncidentsManagementPage() {
     <BackofficeShell
       activeKey="incidents-management"
       title="Gestion de incidencias"
-      subtitle="Registra incidencias, filtra el listado operativo y consulta las metricas agregadas."
+      subtitle="Filtra, actualiza y registra incidencias operativas."
     >
       <IncidentsManagementPanel />
     </BackofficeShell>

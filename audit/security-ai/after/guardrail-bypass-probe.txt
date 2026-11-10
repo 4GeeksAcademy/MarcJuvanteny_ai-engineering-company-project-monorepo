@@ -1,0 +1,6 @@
+entrada usuario  directo              -> BLOQUEADO
+entrada usuario  zero-width U+200B    -> BLOQUEADO
+entrada usuario  ancho completo       -> BLOQUEADO
+contenido externo nota oculta (caso 2) -> NEUTRALIZADO
+contenido externo ignora + oculto      -> NEUTRALIZADO
+contenido externo política legítima    -> sin cambios

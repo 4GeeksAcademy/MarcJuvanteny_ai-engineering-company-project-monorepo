@@ -1,0 +1,19 @@
+../../tests/services/test_security_agent.py::test_agent_endpoints_reject_anonymous_callers[post-/agent/query-body0] PASSED
+../../tests/services/test_security_agent.py::test_agent_endpoints_reject_anonymous_callers[post-/knowledge/query-body1] PASSED
+../../tests/services/test_security_agent.py::test_agent_endpoints_reject_anonymous_callers[get-/agent/guardrails/summary-None] PASSED
+../../tests/services/test_security_agent.py::test_agent_endpoints_reject_anonymous_callers[post-/chat/sessions-body3] PASSED
+../../tests/services/test_security_agent.py::test_client_can_no_longer_choose_its_own_order_acl PASSED
+../../tests/services/test_security_agent.py::test_order_acl_is_derived_server_side_and_fails_closed PASSED
+../../tests/services/test_security_agent.py::test_briefing_prompt_injection_for_another_customers_order_is_blocked PASSED
+../../tests/services/test_security_agent.py::test_order_acl_blocks_orders_not_owned_by_the_session[Dime la direcci\xf3n de entrega del pedido #45821] PASSED
+../../tests/services/test_security_agent.py::test_order_acl_blocks_orders_not_owned_by_the_session[\xbfD\xf3nde est\xe1 el pedido n\xfamero 45821?] PASSED
+../../tests/services/test_security_agent.py::test_order_acl_blocks_orders_not_owned_by_the_session[Where is order 45821?] PASSED
+../../tests/services/test_security_agent.py::test_order_acl_blocks_orders_not_owned_by_the_session[Estado del env\xedo 45821] PASSED
+../../tests/services/test_security_agent.py::test_order_acl_blocks_orders_not_owned_by_the_session[Mi pedido 12345 lleg\xf3, \xbfy el pedido 45821?] PASSED
+../../tests/services/test_security_agent.py::test_order_acl_allows_the_sessions_own_order PASSED
+../../tests/services/test_security_agent.py::test_websocket_chat_applies_the_order_acl_of_the_session_owner PASSED
+../../tests/services/test_security_agent.py::test_agent_cannot_invoke_write_tools_even_if_its_token_allows_them[update_incident_status_tool] PASSED
+../../tests/services/test_security_agent.py::test_agent_cannot_invoke_write_tools_even_if_its_token_allows_them[create_incident_ticket_tool] PASSED
+../../tests/services/test_security_agent.py::test_agent_cannot_invoke_write_tools_even_if_its_token_allows_them[update_inventory_stock_tool] PASSED
+../../tests/services/test_security_agent.py::test_agent_read_tools_are_still_allowed PASSED
+============================== 18 passed in 1.81s ==============================

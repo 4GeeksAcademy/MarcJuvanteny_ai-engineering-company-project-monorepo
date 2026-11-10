@@ -120,12 +120,11 @@ export function IncidentAnalysisPanel() {
   return (
     <div className="analysis-grid">
       <section className="card analysis-intro-card">
-        <div className="eyebrow">Hito 07 · Analisis de incidencias</div>
+        <div className="eyebrow">Analisis de incidencias</div>
         <h2 className="panel-title">Carga un CSV y analiza calidad y operacion en un solo paso</h2>
         <p className="analysis-copy">
-          Arrastra el fichero exportado del helpdesk o selecciona un CSV manualmente. La vista
-          consume el endpoint backend y muestra el resumen operativo, los invalidos y el indice de
-          satisfaccion en cerrados.
+          Arrastra el fichero exportado del helpdesk o selecciona un CSV manualmente. Obtendras el resumen
+          operativo, los registros invalidos y el indice de satisfaccion en cerrados.
         </p>
 
         <label

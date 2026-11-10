@@ -24,6 +24,7 @@ from sqlmodel import Session, select
 
 from .approval_graph import ApprovalDecision, build_approval_graph
 from .evaluation_graph import build_evaluation_graph
+from .events import record_ticket_created
 from .generation_graph import build_generation_graph
 from .generators import GENERATOR_REGISTRY
 from .graph import build_graph
@@ -90,6 +91,32 @@ def _pending_approvals_from_interrupts(interrupts) -> list[dict[str, Any]]:
     return [{**interrupt.value, "interrupt_id": interrupt.id} for interrupt in interrupts]
 
 
+def _announce_valid_rfp(
+    session: Session, ticket: RFPTicket, metadata: dict[str, Any], readability_metrics: dict[str, Any]
+) -> RFPMetadataRecord:
+    """Persiste el `RFPMetadataRecord` + el evento `rfp_ticket_created`
+    (outbox, `events.py`) en UNA transacción, con el ticket todavía en
+    `analizando` -- el endpoint SSE lo emite en cuanto aparece la fila."""
+
+    metadata_record = RFPMetadataRecord(
+        ticket_id=ticket.id,
+        client_name=metadata.get("client_name"),
+        client_country=metadata.get("client_country"),
+        services_requested=metadata.get("services_requested") or [],
+        monthly_volume=metadata.get("monthly_volume"),
+        deadline=metadata.get("deadline"),
+        budget_range=metadata.get("budget_range"),
+        departments_needed=metadata.get("departments_needed") or [],
+        readability_metrics=readability_metrics,
+    )
+    session.add(metadata_record)
+    session.flush()  # asigna metadata_record.id (= rfp_id del payload) antes de armar el evento
+    record_ticket_created(session, ticket, metadata_record)
+    session.commit()
+    session.refresh(metadata_record)
+    return metadata_record
+
+
 def process_rfp_ticket(ticket_id: int, *, session: Session | None = None) -> dict[str, Any]:
     """Procesa un ticket ya creado en estado `analizando` (ver
     `RFPTicket.raw_pdf_path`): convierte su PDF, corre el grafo, y
@@ -112,10 +139,20 @@ def process_rfp_ticket(ticket_id: int, *, session: Session | None = None) -> dic
         if ticket is None:
             raise ValueError(f"RFPTicket {ticket_id} no existe.")
 
+        metadata_record: RFPMetadataRecord | None = None
         try:
             markdown_text = convert_pdf_to_markdown(ticket.raw_pdf_path)
             readability_metrics = compute_readability_metrics(markdown_text)
-            graph_result = _COMPILED_GRAPH.invoke({"markdown_text": markdown_text})
+            # `stream` en vez de `invoke`: CONTEXT10.md pide notificar "en el
+            # momento exacto" en que el documento queda clasificado como RFP
+            # válida -- es decir, al salir del nodo `classify`, no al final
+            # del grafo (workers + synthesizer tardan bastante más).
+            graph_result: dict[str, Any] = {}
+            for graph_result in _COMPILED_GRAPH.stream({"markdown_text": markdown_text}, stream_mode="values"):
+                if metadata_record is None and (graph_result.get("classification") or {}).get("is_valid"):
+                    metadata_record = _announce_valid_rfp(
+                        active_session, ticket, graph_result.get("metadata") or {}, readability_metrics
+                    )
         except Exception as exc:
             logger.exception("Fallo procesando RFPTicket %s", ticket_id)
             ticket.status = TicketStatus.DESCARTADO.value
@@ -136,18 +173,8 @@ def process_rfp_ticket(ticket_id: int, *, session: Session | None = None) -> dic
             return {"ticket_id": ticket_id, "status": ticket.status, "classification": classification}
 
         metadata = graph_result.get("metadata") or {}
-        metadata_record = RFPMetadataRecord(
-            ticket_id=ticket_id,
-            client_name=metadata.get("client_name"),
-            client_country=metadata.get("client_country"),
-            services_requested=metadata.get("services_requested") or [],
-            monthly_volume=metadata.get("monthly_volume"),
-            deadline=metadata.get("deadline"),
-            budget_range=metadata.get("budget_range"),
-            departments_needed=metadata.get("departments_needed") or [],
-            readability_metrics=readability_metrics,
-        )
-        active_session.add(metadata_record)
+        if metadata_record is None:
+            metadata_record = _announce_valid_rfp(active_session, ticket, metadata, readability_metrics)
 
         summary = graph_result.get("summary") or {}
         key_aspects_by_department: dict[str, Any] = summary.get("key_aspects_by_department", {})

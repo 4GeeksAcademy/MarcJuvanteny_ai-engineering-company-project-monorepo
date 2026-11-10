@@ -1,0 +1,77 @@
+[
+  {
+    "node": "receive_question",
+    "output": {
+      "question": "¿Qué transportista cubre mejor Aragón rural?"
+    }
+  },
+  {
+    "node": "input_guard",
+    "output": {}
+  },
+  {
+    "node": "classify_intent",
+    "output": {
+      "route": "rag"
+    }
+  },
+  {
+    "node": "retrieve_memory",
+    "output": {
+      "memory_context": []
+    }
+  },
+  {
+    "node": "retrieve",
+    "output": {
+      "context": [
+        {
+          "company": "trackflow",
+          "source_document": "carrier-coverage",
+          "section": "Cobertura en España",
+          "language": "es",
+          "chunk_index": 2,
+          "text": "Cobertura en España\n\n| Transportista | Zona de servicio | Notas |\n| --- | --- | --- |\n| MRW España | Península Ibérica | Transportista principal para entregas en España, contrato negociado por volumen. |\n| SEUR | Península Ibérica + Baleares | Única cobertura estándar para Baleares. |\n| Nacex | Aragón y zona norte | **Mejor cobertura regional en Aragón** — incluye zonas rurales de la provincia que otros transportistas nacionales cubren con menor frecuencia de recogida. Es la referencia para preguntas sobre Aragón rural. |\n| DHL Express España | España + internacional | Envíos urgentes y exportaciones desde Zaragoza. |"
+        },
+        {
+          "company": "trackflow",
+          "source_document": "carrier-coverage",
+          "section": "Cobertura en Estados Unidos",
+          "language": "es",
+          "chunk_index": 1,
+          "text": "Cobertura en Estados Unidos\n\n| Transportista | Zona de servicio | Notas |\n| --- | --- | --- |\n| UPS Ground | West Coast | Transportista principal para entregas locales en Los Ángeles y alrededores. |\n| FedEx Ground | Estados Unidos continental | Cobertura nacional estándar. |\n| OnTrac | West Coast | Transportista regional, mejor tarifa en la zona de Los Ángeles. |\n| DHL Express USA | Estados Unidos continental + internacional | Envíos urgentes y exportaciones a Europa. |"
+        },
+        {
+          "company": "trackflow",
+          "source_document": "carrier-coverage",
+          "section": "Transportistas internacionales",
+          "language": "es",
+          "chunk_index": 3,
+          "text": "Transportistas internacionales\n\nLas exportaciones internacionales, desde cualquiera de los dos almacenes,\nse gestionan siempre a través de DHL Express (DHL Express USA desde Los\nÁngeles, DHL Express España desde Zaragoza) — es el único transportista de\nla red de TrackFlow con cobertura internacional en ambos países."
+        },
+        {
+          "company": "trackflow",
+          "source_document": "carrier-coverage",
+          "section": "Resumen",
+          "language": "es",
+          "chunk_index": 0,
+          "text": "Resumen\n\nTrackFlow trabaja con una red de transportistas distinta en cada país,\ngestionada por Carlos Vega (Head of Carrier Operations). Este documento\nresume la cobertura activa de cada transportista para responder preguntas\nde clientes sobre qué transportista cubre una zona concreta."
+        }
+      ]
+    }
+  },
+  {
+    "node": "generate",
+    "output": {
+      "answer": "¡Hola! Según la información de cobertura que manejo para TrackFlow, en Aragón (España) el transportista que ofrece la mejor cobertura en zonas rurales es **Nacex**.\n\nNacex cubre especialmente la provincia de Aragón y la zona norte, incluyendo áreas rurales que otros transportistas nacionales visitan con menor frecuencia de recogida. Es la referencia para este tipo de consultas.\n\n¿Tenés algún pedido con destino a Aragón rural sobre el que necesites información de seguimiento o asistencia? ¡Estoy acá para ayudarte!"
+    }
+  },
+  {
+    "node": "output_guard",
+    "output": {}
+  },
+  {
+    "node": "propose_memory",
+    "output": {}
+  }
+]

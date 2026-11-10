@@ -37,10 +37,19 @@ class Principal(BaseModel):
     role: str
 
 
+MIN_JWT_SECRET_LENGTH = 32
+
+
 def _get_jwt_secret() -> str:
     secret = os.environ.get("JWT_SECRET_KEY")
     if not secret:
         raise HTTPException(status_code=500, detail="JWT_SECRET_KEY is not configured.")
+    # Hito 12 (credenciales): HS256 con un secreto corto se fuerza por
+    # diccionario/fuerza bruta offline a partir de UN token capturado. RFC 7518
+    # §3.2: clave >= tamaño del hash (256 bits). Falla cerrado: sin secreto
+    # válido no se emite ni se acepta ningún token.
+    if len(secret) < MIN_JWT_SECRET_LENGTH:
+        raise HTTPException(status_code=500, detail=f"JWT_SECRET_KEY must be at least {MIN_JWT_SECRET_LENGTH} characters.")
     return secret
 
 
